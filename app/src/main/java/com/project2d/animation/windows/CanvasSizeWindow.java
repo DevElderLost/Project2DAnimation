@@ -1,69 +1,69 @@
 package com.project2d.animation.windows;
 
 import android.content.Context;
-import android.graphics.Canvas;
-import android.graphics.Paint;
-import android.graphics.RectF;
-import android.graphics.Typeface;
-import android.os.Handler;
-import android.os.Looper;
+import android.graphics.*;
+import android.os.*;
 import android.text.InputType;
 import android.util.AttributeSet;
-import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
-import android.view.ViewGroup;
+import android.view.inputmethod.EditorInfo;
+import android.view.inputmethod.InputMethodManager;
 import android.widget.EditText;
-import android.widget.FrameLayout;
-import android.widget.LinearLayout;
-import android.widget.TextView;
 
 import com.project2d.animation.canvas.AnimationCanvasView;
 import com.project2d.animation.ui.ImGuiTheme;
 
-public class CanvasSizeWindow extends FrameLayout {
+/**
+ * Canvas Size Window — arsitektur sama persis dengan FloatingWindow.
+ * Satu View, semua digambar di onDraw dengan Canvas API.
+ * EditText untuk custom size di-overlay secara programatik.
+ */
+public class CanvasSizeWindow extends View {
 
     public interface OnCanvasSizeApplied {
         void onPresetSelected(AnimationCanvasView.CanvasPreset preset);
         void onCustomSelected(int width, int height);
     }
 
-    private static final int WIN_W_DP   = 220;
-    private static final int TITLE_H_DP = 28;
-
+    // ── Geometry ──────────────────────────────────────────────────────────────
     private float winX = 40f, winY = 60f;
-    private boolean isDragging     = false;
-    private float touchDownRawX    = 0f, touchDownRawY = 0f;
-    private float dragOffsetX      = 0f, dragOffsetY   = 0f;
-    private static final long LP_MS = 400L;
-    private final Handler lpHandler = new Handler(Looper.getMainLooper());
-    // lpRunnable dideklarasikan null dulu, diisi di constructor setelah chromeOverlay ready
-    private Runnable lpRunnable;
+    private float winW, winH;
 
-    private final Paint pWinBg    = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint pTitleBg  = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint pTitleAct = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint pBorder   = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint pShadow   = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint pTitleTxt = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint pCloseBtn = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint pCloseBg  = new Paint(Paint.ANTI_ALIAS_FLAG);
+    // ── Drag ──────────────────────────────────────────────────────────────────
+    private boolean isDragging         = false;
+    private boolean longPressTriggered = false;
+    private float   touchDownX = 0f, touchDownY = 0f;
+    private float   dragOffsetX = 0f, dragOffsetY = 0f;
+    private static final long LP_MS   = 400L;
+    private final Handler   lpHandler  = new Handler(Looper.getMainLooper());
+    private final Runnable  lpRunnable = () -> { longPressTriggered=true; isDragging=true; invalidate(); };
 
-    private ChromeOverlay chromeOverlay;
-    private LinearLayout  contentLayout;
-    private EditText      editW, editH;
+    // ── Paints — sama persis FloatingWindow ───────────────────────────────────
+    private final Paint pBg    = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint pTitle = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint pBdr   = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint pTxt   = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint pSub   = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint pBtn   = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint pBtnH  = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint pBtnT  = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint pSh    = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint pCheck = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint pSep   = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint pHint  = new Paint(Paint.ANTI_ALIAS_FLAG);
 
-    private AnimationCanvasView.CanvasPreset selectedPreset =
-        AnimationCanvasView.CanvasPreset.HD_1280x720;
-    private OnCanvasSizeApplied listener;
+    // ── Hit rects ─────────────────────────────────────────────────────────────
+    private final RectF winRect      = new RectF();
+    private final RectF titleRect    = new RectF();
+    private final RectF closeBtnRect = new RectF();
+    private final RectF applyBtnRect = new RectF();
+    private final RectF[] presetRects = new RectF[5];
 
-    private float density;
-    private int   titleBarHpx;
-    private int   winWpx;
+    private boolean closeHov = false, applyHov = false;
+    private int     hoveredPreset = -1;
 
-    private final RectF closeRect = new RectF();
-    private boolean     closeHov  = false;
-
+    // ── State ─────────────────────────────────────────────────────────────────
     private final AnimationCanvasView.CanvasPreset[] PRESETS = {
         AnimationCanvasView.CanvasPreset.HD_1280x720,
         AnimationCanvasView.CanvasPreset.FHD_1920x1080,
@@ -71,130 +71,53 @@ public class CanvasSizeWindow extends FrameLayout {
         AnimationCanvasView.CanvasPreset.A4_PORTRAIT,
         AnimationCanvasView.CanvasPreset.SMALL_640x480,
     };
-    private final PresetRowView[] presetRows = new PresetRowView[5];
+    private int selectedPresetIdx = 0;
 
-    public CanvasSizeWindow(Context ctx) {
-        super(ctx);
-        density     = ctx.getResources().getDisplayMetrics().density;
-        titleBarHpx = (int)(TITLE_H_DP * density);
-        winWpx      = (int)(WIN_W_DP   * density);
+    // ── EditText untuk custom W/H (overlay di atas View) ─────────────────────
+    private EditText editW, editH;
+    private final RectF editWRect = new RectF();
+    private final RectF editHRect = new RectF();
 
-        setWillNotDraw(false);
-        initPaints();
+    private float density;
+    private OnCanvasSizeApplied listener;
 
-        // Content layout di bawah title bar
-        contentLayout = new LinearLayout(ctx);
-        contentLayout.setOrientation(LinearLayout.VERTICAL);
-        contentLayout.setBackgroundColor(0xFF1A1A1A);
-        FrameLayout.LayoutParams clp = new FrameLayout.LayoutParams(
-            winWpx, ViewGroup.LayoutParams.WRAP_CONTENT);
-        clp.topMargin = titleBarHpx;
-        addView(contentLayout, clp);
+    // ── Constructor ───────────────────────────────────────────────────────────
 
-        buildContent(ctx);
+    public CanvasSizeWindow(Context c)               { super(c); init(); }
+    public CanvasSizeWindow(Context c, AttributeSet a){ super(c,a); init(); }
 
-        // ChromeOverlay hanya setinggi title bar
-        chromeOverlay = new ChromeOverlay(ctx);
-        addView(chromeOverlay, new FrameLayout.LayoutParams(winWpx, titleBarHpx));
+    private void init() {
+        density = getResources().getDisplayMetrics().density;
 
-        // lpRunnable diinisialisasi SETELAH chromeOverlay dibuat
-        lpRunnable = () -> {
-            isDragging = true;
-            chromeOverlay.invalidate();
-        };
+        // Ukuran window — sama lebar dengan FloatingWindow (220dp)
+        winW = 220 * density;
+        // winH dihitung dinamis di onDraw berdasarkan konten
 
-        setVisibility(GONE);
+        // Paints — sama persis FloatingWindow
+        pBg.setColor(ImGuiTheme.COLOR_FLOAT_WIN_BG);          pBg.setStyle(Paint.Style.FILL);
+        pTitle.setColor(ImGuiTheme.COLOR_FLOAT_WIN_TITLE);     pTitle.setStyle(Paint.Style.FILL);
+        pBdr.setColor(ImGuiTheme.COLOR_FLOAT_WIN_BORDER);      pBdr.setStyle(Paint.Style.STROKE); pBdr.setStrokeWidth(1.5f);
+        pTxt.setColor(ImGuiTheme.COLOR_TEXT);                  pTxt.setTextSize(13*density); pTxt.setTypeface(Typeface.MONOSPACE); pTxt.setFakeBoldText(true);
+        pSub.setColor(ImGuiTheme.COLOR_TEXT);                  pSub.setTextSize(12*density); pSub.setTypeface(Typeface.MONOSPACE);
+        pBtn.setColor(ImGuiTheme.COLOR_BUTTON);                pBtn.setStyle(Paint.Style.FILL);
+        pBtnH.setColor(ImGuiTheme.COLOR_BUTTON_HOVERED);       pBtnH.setStyle(Paint.Style.FILL);
+        pBtnT.setColor(ImGuiTheme.COLOR_BUTTON_TEXT);          pBtnT.setTextSize(12*density); pBtnT.setTypeface(Typeface.MONOSPACE);
+        pSh.setColor(0x44000000);                              pSh.setStyle(Paint.Style.FILL);
+        pCheck.setColor(ImGuiTheme.COLOR_BUTTON_HOVERED);      pCheck.setStyle(Paint.Style.FILL);
+        pSep.setColor(ImGuiTheme.COLOR_FLOAT_WIN_BORDER);      pSep.setStyle(Paint.Style.STROKE); pSep.setStrokeWidth(1f);
+        pHint.setColor(ImGuiTheme.COLOR_TEXT_DISABLED);        pHint.setTextSize(10*density); pHint.setTypeface(Typeface.MONOSPACE);
+
+        for (int i=0; i<5; i++) presetRects[i] = new RectF();
+
         setClickable(true);
+        setVisibility(GONE);
     }
 
-    public CanvasSizeWindow(Context ctx, AttributeSet attrs) { this(ctx); }
+    // ── EditText overlay — dipanggil dari Activity setelah addView ────────────
 
-    // ── initPaints ────────────────────────────────────────────────────────────
-
-    private void initPaints() {
-        pWinBg.setColor(0xFF1A1A1A);    pWinBg.setStyle(Paint.Style.FILL);
-        pTitleBg.setColor(0xFF131320);  pTitleBg.setStyle(Paint.Style.FILL);
-        pTitleAct.setColor(0xFF1E1E30); pTitleAct.setStyle(Paint.Style.FILL);
-        pBorder.setColor(0xFF3A3A5A);   pBorder.setStyle(Paint.Style.STROKE); pBorder.setStrokeWidth(1.5f);
-        pShadow.setColor(0x55000000);   pShadow.setStyle(Paint.Style.FILL);
-        pTitleTxt.setColor(0xFFBBBBCC); pTitleTxt.setTextSize(12*density);
-        pTitleTxt.setTypeface(Typeface.MONOSPACE); pTitleTxt.setFakeBoldText(true); pTitleTxt.setAntiAlias(true);
-        pCloseBtn.setColor(0xFF777799); pCloseBtn.setTextSize(12*density);
-        pCloseBtn.setTypeface(Typeface.MONOSPACE); pCloseBtn.setAntiAlias(true);
-        pCloseBg.setColor(0xFFCC4444);  pCloseBg.setStyle(Paint.Style.FILL);
-    }
-
-    // ── buildContent ──────────────────────────────────────────────────────────
-
-    private void buildContent(Context ctx) {
-        int pH = (int)(10 * density);
-
-        contentLayout.addView(vgap(ctx, (int)(4*density)));
-        contentLayout.addView(sectionLabel(ctx, "Preset"));
-        contentLayout.addView(separator(ctx));
-
-        for (int i = 0; i < PRESETS.length; i++) {
-            presetRows[i] = new PresetRowView(ctx, PRESETS[i]);
-            contentLayout.addView(presetRows[i]);
-        }
-
-        contentLayout.addView(vgap(ctx, (int)(6*density)));
-        contentLayout.addView(sectionLabel(ctx, "Custom"));
-        contentLayout.addView(separator(ctx));
-        contentLayout.addView(vgap(ctx, (int)(4*density)));
-
-        LinearLayout inputRow = new LinearLayout(ctx);
-        inputRow.setOrientation(LinearLayout.HORIZONTAL);
-        inputRow.setGravity(Gravity.CENTER_VERTICAL);
-        inputRow.setPadding(pH, 0, pH, 0);
-
-        editW = buildEditText(ctx, "W");
-        editH = buildEditText(ctx, "H");
-
-        TextView xLbl = new TextView(ctx);
-        xLbl.setText(" x "); xLbl.setTextColor(0xFF666677);
-        xLbl.setTextSize(12); xLbl.setTypeface(Typeface.MONOSPACE);
-
-        inputRow.addView(editW, new LinearLayout.LayoutParams(0, (int)(30*density), 1f));
-        inputRow.addView(xLbl);
-        inputRow.addView(editH, new LinearLayout.LayoutParams(0, (int)(30*density), 1f));
-        contentLayout.addView(inputRow, new LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-
-        contentLayout.addView(vgap(ctx, (int)(8*density)));
-        contentLayout.addView(separator(ctx));
-        contentLayout.addView(vgap(ctx, (int)(6*density)));
-
-        LinearLayout btnRow = new LinearLayout(ctx);
-        btnRow.setOrientation(LinearLayout.HORIZONTAL);
-        btnRow.setGravity(Gravity.END);
-        btnRow.setPadding(pH, 0, pH, 0);
-
-        View btnApply = buildButton(ctx, "Apply");
-        btnApply.setOnClickListener(v -> handleApply());
-        btnRow.addView(btnApply);
-        contentLayout.addView(btnRow, new LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-
-        contentLayout.addView(vgap(ctx, (int)(6*density)));
-        refreshPresetHighlights();
-    }
-
-    // ── Apply ─────────────────────────────────────────────────────────────────
-
-    private void handleApply() {
-        String ws = editW.getText().toString().trim();
-        String hs = editH.getText().toString().trim();
-        if (!ws.isEmpty() && !hs.isEmpty()) {
-            try {
-                int w = Integer.parseInt(ws), h = Integer.parseInt(hs);
-                if (w > 0 && h > 0 && listener != null) {
-                    listener.onCustomSelected(w, h);
-                    return;
-                }
-            } catch (NumberFormatException ignored) {}
-        }
-        if (listener != null) listener.onPresetSelected(selectedPreset);
+    public void attachEditTexts(EditText ew, EditText eh) {
+        this.editW = ew;
+        this.editH = eh;
     }
 
     // ── Public API ────────────────────────────────────────────────────────────
@@ -202,254 +125,303 @@ public class CanvasSizeWindow extends FrameLayout {
     public void setOnCanvasSizeApplied(OnCanvasSizeApplied l) { this.listener = l; }
 
     public void setCurrentPreset(AnimationCanvasView.CanvasPreset p) {
-        selectedPreset = p;
-        refreshPresetHighlights();
+        for (int i=0; i<PRESETS.length; i++) {
+            if (PRESETS[i] == p) { selectedPresetIdx = i; break; }
+        }
+        invalidate();
     }
 
-    public void showWindow() { setVisibility(VISIBLE); bringToFront(); }
-    public void hideWindow() { setVisibility(GONE); }
-
-    public void setPosition(float x, float y) {
-        winX = x; winY = y;
-        setTranslationX(winX); setTranslationY(winY);
+    public void showWindow() { setVisibility(VISIBLE); bringToFront(); invalidate(); }
+    public void hideWindow() {
+        setVisibility(GONE);
+        hideKeyboard();
     }
 
-    private void refreshPresetHighlights() {
-        for (int i = 0; i < presetRows.length; i++)
-            if (presetRows[i] != null) presetRows[i].setChecked(PRESETS[i] == selectedPreset);
+    public void setPosition(float x, float y) { winX=x; winY=y; invalidate(); }
+
+    private void hideKeyboard() {
+        InputMethodManager imm = (InputMethodManager)
+            getContext().getSystemService(Context.INPUT_METHOD_SERVICE);
+        if (imm != null && editW != null) imm.hideSoftInputFromWindow(editW.getWindowToken(), 0);
     }
 
-    // ── Layout ────────────────────────────────────────────────────────────────
-
-    @Override
-    protected void onMeasure(int wSpec, int hSpec) {
-        super.onMeasure(MeasureSpec.makeMeasureSpec(winWpx, MeasureSpec.EXACTLY), hSpec);
-    }
+    // ── onDraw — sama strukturnya dengan FloatingWindow ───────────────────────
 
     @Override
     protected void onDraw(Canvas canvas) {
-        int w = getWidth(), h = getHeight();
-        canvas.drawRoundRect(new RectF(4, 4, w+4, h+4), 4, 4, pShadow);
-        canvas.drawRoundRect(new RectF(0, 0, w, h),     4, 4, pWinBg);
-        canvas.drawRoundRect(new RectF(0.75f, 0.75f, w-0.75f, h-0.75f), 4, 4, pBorder);
+        float r   = ImGuiTheme.BORDER_RADIUS;
+        float pad = 10 * density;
+        float tH  = ImGuiTheme.TITLE_BAR_HEIGHT_DP * density;
+        float rowH = 26 * density;
+        float ckSz = 12 * density;
+
+        // Hitung tinggi window dinamis
+        float contentH =
+            tH                      // title bar
+            + pad * 0.5f            // gap
+            + 14 * density          // label "Preset"
+            + 4 * density           // gap
+            + 1                     // separator
+            + rowH * 5              // 5 preset rows
+            + pad                   // gap
+            + 14 * density          // label "Custom"
+            + 4 * density           // gap
+            + 1                     // separator
+            + pad * 0.5f            // gap
+            + 30 * density          // input row W x H
+            + pad                   // gap
+            + 1                     // separator
+            + pad                   // gap
+            + 28 * density          // Apply button
+            + pad;                  // bottom padding
+
+        winH = contentH;
+
+        // Clamp posisi agar tidak keluar layar
+        winX = Math.max(0, Math.min(winX, getWidth()  - winW));
+        winY = Math.max(0, Math.min(winY, getHeight() - winH));
+        winRect.set(winX, winY, winX+winW, winY+winH);
+
+        // Shadow — sama dengan FloatingWindow
+        float so = isDragging ? 8*density : 4*density;
+        canvas.drawRoundRect(new RectF(winX+so,winY+so,winX+winW+so,winY+winH+so), r,r, pSh);
+
+        // Window background
+        canvas.drawRoundRect(winRect, r, r, pBg);
+
+        // Title bar
+        titleRect.set(winX, winY, winX+winW, winY+tH);
+        Paint tp = new Paint(pTitle);
+        if (isDragging) tp.setColor(ImGuiTheme.COLOR_FLOAT_WIN_TITLE_ACTIVE);
+        canvas.save(); canvas.clipRect(winRect);
+        canvas.drawRoundRect(new RectF(winX,winY,winX+winW,winY+tH+r), r,r, tp);
+        canvas.restore();
+
+        // Title text
+        Paint.FontMetrics fm = pTxt.getFontMetrics();
+        float tY = titleRect.centerY() - (fm.ascent+fm.descent)/2f;
+        canvas.drawText("Canvas Size", winX+pad, tY, pTxt);
+
+        // Close button × — sama persis FloatingWindow
+        float cSz = tH * 0.65f;
+        closeBtnRect.set(winX+winW-cSz-5*density, winY+(tH-cSz)/2f,
+                         winX+winW-5*density,      winY+(tH+cSz)/2f);
+        if (closeHov) {
+            Paint cp = new Paint(Paint.ANTI_ALIAS_FLAG);
+            cp.setColor(0xFFEE6666); cp.setStyle(Paint.Style.FILL);
+            canvas.drawRoundRect(closeBtnRect, 2,2, cp);
+        }
+        Paint xP = new Paint(pTxt);
+        xP.setColor(closeHov ? 0xFFFFFFFF : 0xFFAAAAAA); xP.setTextSize(12*density);
+        Paint.FontMetrics xfm = xP.getFontMetrics();
+        canvas.drawText("x",
+            closeBtnRect.centerX()-xP.measureText("x")/2f,
+            closeBtnRect.centerY()-(xfm.ascent+xfm.descent)/2f, xP);
+
+        // Window border
+        canvas.drawRoundRect(winRect, r, r, pBdr);
+
+        // ── Konten di bawah title bar ─────────────────────────────────────────
+        float y = winY + tH + pad*0.5f;
+
+        // Label "Preset"
+        canvas.drawText("PRESET", winX+pad, y + 12*density, pHint);
+        y += 14*density + 4*density;
+
+        // Separator
+        canvas.drawLine(winX+pad, y, winX+winW-pad, y, pSep);
+        y += 1;
+
+        // Preset rows dengan checkbox
+        Paint.FontMetrics sfm = pSub.getFontMetrics();
+        for (int i=0; i<PRESETS.length; i++) {
+            presetRects[i].set(winX+2, y, winX+winW-2, y+rowH);
+
+            // Row highlight
+            if (i == hoveredPreset || i == selectedPresetIdx) {
+                Paint rowBg = new Paint(Paint.ANTI_ALIAS_FLAG);
+                rowBg.setStyle(Paint.Style.FILL);
+                rowBg.setColor(i==selectedPresetIdx
+                    ? ImGuiTheme.COLOR_FLOAT_WIN_TITLE_ACTIVE
+                    : ImGuiTheme.COLOR_FLOAT_WIN_TITLE);
+                canvas.drawRoundRect(presetRects[i], 2,2, rowBg);
+            }
+
+            // Checkbox kotak
+            float bX = winX + pad;
+            float bY = y + (rowH-ckSz)/2f;
+            RectF ckRect = new RectF(bX, bY, bX+ckSz, bY+ckSz);
+            Paint ckBg = new Paint(Paint.ANTI_ALIAS_FLAG);
+            ckBg.setColor(ImGuiTheme.COLOR_WINDOW_BG); ckBg.setStyle(Paint.Style.FILL);
+            canvas.drawRoundRect(ckRect, 2,2, ckBg);
+            Paint ckBdr = new Paint(Paint.ANTI_ALIAS_FLAG);
+            ckBdr.setColor(ImGuiTheme.COLOR_FLOAT_WIN_BORDER); ckBdr.setStyle(Paint.Style.STROKE); ckBdr.setStrokeWidth(1.5f);
+            canvas.drawRoundRect(ckRect, 2,2, ckBdr);
+            // Checkmark
+            if (i == selectedPresetIdx) {
+                float inn = ckSz * 0.28f;
+                canvas.drawRoundRect(new RectF(ckRect.left+inn,ckRect.top+inn,ckRect.right-inn,ckRect.bottom-inn),1,1,pCheck);
+            }
+
+            // Label preset
+            float labelY = y + rowH/2f - (sfm.ascent+sfm.descent)/2f;
+            canvas.drawText(PRESETS[i].label, bX+ckSz+6*density, labelY, pSub);
+
+            y += rowH;
+        }
+
+        y += pad;
+
+        // Label "Custom"
+        canvas.drawText("CUSTOM", winX+pad, y + 12*density, pHint);
+        y += 14*density + 4*density;
+
+        // Separator
+        canvas.drawLine(winX+pad, y, winX+winW-pad, y, pSep);
+        y += 1 + pad*0.5f;
+
+        // Input row W x H — posisi disimpan untuk EditText overlay
+        float inputH = 30 * density;
+        float inputW = (winW - pad*2 - 20*density) / 2f;
+        editWRect.set(winX+pad, y, winX+pad+inputW, y+inputH);
+        editHRect.set(winX+winW-pad-inputW, y, winX+winW-pad, y+inputH);
+
+        // Gambar kotak input background
+        Paint inputBg = new Paint(Paint.ANTI_ALIAS_FLAG);
+        inputBg.setColor(ImGuiTheme.COLOR_WINDOW_BG); inputBg.setStyle(Paint.Style.FILL);
+        canvas.drawRoundRect(editWRect, 3,3, inputBg);
+        canvas.drawRoundRect(editHRect, 3,3, inputBg);
+        canvas.drawRoundRect(editWRect, 3,3, pBdr);
+        canvas.drawRoundRect(editHRect, 3,3, pBdr);
+
+        // Label " x " di tengah
+        String xStr = " x ";
+        float xStrW = pSub.measureText(xStr);
+        float xStrX = editWRect.right + (editHRect.left-editWRect.right-xStrW)/2f;
+        canvas.drawText(xStr, xStrX, y+inputH/2f-(sfm.ascent+sfm.descent)/2f, pSub);
+
+        // Posisikan EditText overlay
+        positionEditTexts(y, inputH, inputW, pad);
+
+        y += inputH + pad;
+
+        // Separator
+        canvas.drawLine(winX+pad, y, winX+winW-pad, y, pSep);
+        y += 1 + pad;
+
+        // Apply button — sama dengan button FloatingWindow
+        float btnW = 70*density, btnH = 26*density;
+        float btnX = winX+winW-pad-btnW;
+        applyBtnRect.set(btnX, y, btnX+btnW, y+btnH);
+        canvas.drawRoundRect(applyBtnRect, 3,3, applyHov?pBtnH:pBtn);
+        Paint bb = new Paint(pBdr); bb.setColor(0xFF6666AA); bb.setStrokeWidth(1f);
+        canvas.drawRoundRect(applyBtnRect, 3,3, bb);
+        Paint.FontMetrics bfm = pBtnT.getFontMetrics();
+        canvas.drawText("Apply",
+            applyBtnRect.centerX()-pBtnT.measureText("Apply")/2f,
+            applyBtnRect.centerY()-(bfm.ascent+bfm.descent)/2f,
+            pBtnT);
     }
 
-    // ── Touch ─────────────────────────────────────────────────────────────────
+    // ── Posisikan EditText overlay sesuai koordinat yang digambar ─────────────
+
+    private void positionEditTexts(float y, float inputH, float inputW, float pad) {
+        if (editW == null || editH == null) return;
+        // Koordinat relatif terhadap parent (FrameLayout)
+        float tx = getTranslationX();
+        float ty = getTranslationY();
+        // editW
+        editW.setX(tx + editWRect.left);
+        editW.setY(ty + editWRect.top);
+        editW.getLayoutParams().width  = (int)inputW;
+        editW.getLayoutParams().height = (int)inputH;
+        editW.requestLayout();
+        // editH
+        editH.setX(tx + editHRect.left);
+        editH.setY(ty + editHRect.top);
+        editH.getLayoutParams().width  = (int)inputW;
+        editH.getLayoutParams().height = (int)inputH;
+        editH.requestLayout();
+    }
+
+    // ── Apply ─────────────────────────────────────────────────────────────────
+
+    private void handleApply() {
+        if (editW!=null && editH!=null) {
+            String ws=editW.getText().toString().trim();
+            String hs=editH.getText().toString().trim();
+            if (!ws.isEmpty()&&!hs.isEmpty()) {
+                try {
+                    int w=Integer.parseInt(ws), h=Integer.parseInt(hs);
+                    if (w>0&&h>0&&listener!=null) { listener.onCustomSelected(w,h); hideKeyboard(); return; }
+                } catch (NumberFormatException ignored) {}
+            }
+        }
+        if (listener!=null) listener.onPresetSelected(PRESETS[selectedPresetIdx]);
+        hideKeyboard();
+    }
+
+    // ── Touch — sama strukturnya dengan FloatingWindow ────────────────────────
 
     @Override
-    public boolean onTouchEvent(MotionEvent e) {
-        float tx = e.getX(), ty = e.getY();
-        boolean inTitle = ty >= 0 && ty <= titleBarHpx;
+    public boolean onTouchEvent(MotionEvent event) {
+        float tx=event.getX(), ty=event.getY();
 
-        switch (e.getActionMasked()) {
+        // Touch di luar window → diteruskan ke bawah
+        if (!winRect.contains(tx,ty)) return false;
+
+        switch (event.getActionMasked()) {
             case MotionEvent.ACTION_DOWN:
-                isDragging    = false;
-                touchDownRawX = e.getRawX(); touchDownRawY = e.getRawY();
-                dragOffsetX   = e.getRawX() - winX;
-                dragOffsetY   = e.getRawY() - winY;
-                closeHov      = closeRect.contains(tx, ty);
-                if (inTitle && !closeRect.contains(tx, ty))
-                    lpHandler.postDelayed(lpRunnable, LP_MS);
-                chromeOverlay.invalidate();
-                return true;
+                touchDownX=tx; touchDownY=ty;
+                longPressTriggered=false; isDragging=false;
+                if (titleRect.contains(tx,ty)&&!closeBtnRect.contains(tx,ty)) {
+                    dragOffsetX=tx-winX; dragOffsetY=ty-winY;
+                    lpHandler.postDelayed(lpRunnable,LP_MS);
+                }
+                closeHov=closeBtnRect.contains(tx,ty);
+                applyHov=applyBtnRect.contains(tx,ty);
+                hoveredPreset=hitPreset(tx,ty);
+                invalidate(); return true;
 
             case MotionEvent.ACTION_MOVE:
-                float mdx = e.getRawX() - touchDownRawX;
-                float mdy = e.getRawY() - touchDownRawY;
-                if (!isDragging && mdx*mdx + mdy*mdy > (8*density)*(8*density))
-                    lpHandler.removeCallbacks(lpRunnable);
                 if (isDragging) {
-                    View parent = (View) getParent();
-                    winX = Math.max(0, Math.min(e.getRawX()-dragOffsetX, parent.getWidth()-getWidth()));
-                    winY = Math.max(0, Math.min(e.getRawY()-dragOffsetY, parent.getHeight()-getHeight()));
-                    setTranslationX(winX); setTranslationY(winY);
+                    winX=tx-dragOffsetX; winY=ty-dragOffsetY; invalidate();
+                } else {
+                    float dx=tx-touchDownX, dy=ty-touchDownY;
+                    if (dx*dx+dy*dy>(8*density)*(8*density)) lpHandler.removeCallbacks(lpRunnable);
+                    closeHov=closeBtnRect.contains(tx,ty);
+                    applyHov=applyBtnRect.contains(tx,ty);
+                    hoveredPreset=hitPreset(tx,ty);
+                    invalidate();
                 }
-                closeHov = closeRect.contains(tx, ty);
-                chromeOverlay.invalidate();
                 return true;
 
             case MotionEvent.ACTION_UP:
                 lpHandler.removeCallbacks(lpRunnable);
-                boolean wd = isDragging; isDragging = false; closeHov = false;
-                if (!wd && closeRect.contains(tx, ty)) hideWindow();
-                chromeOverlay.invalidate();
-                return true;
+                boolean wd=isDragging; isDragging=false; longPressTriggered=false;
+                if (!wd) {
+                    if (closeBtnRect.contains(tx,ty)) { hideWindow(); }
+                    else if (applyBtnRect.contains(tx,ty)) { handleApply(); }
+                    else {
+                        int hit=hitPreset(tx,ty);
+                        if (hit>=0) { selectedPresetIdx=hit; if(editW!=null)editW.setText(""); if(editH!=null)editH.setText(""); }
+                    }
+                }
+                closeHov=false; applyHov=false; hoveredPreset=-1;
+                invalidate(); return true;
 
             case MotionEvent.ACTION_CANCEL:
                 lpHandler.removeCallbacks(lpRunnable);
-                isDragging = false; closeHov = false;
-                chromeOverlay.invalidate();
-                return true;
+                isDragging=false; longPressTriggered=false;
+                closeHov=false; applyHov=false; hoveredPreset=-1;
+                invalidate(); return true;
         }
-        return super.onTouchEvent(e);
+        return false;
     }
 
-    // ── View helpers ──────────────────────────────────────────────────────────
-
-    private EditText buildEditText(Context ctx, String hint) {
-        EditText et = new EditText(ctx);
-        et.setHint(hint); et.setHintTextColor(0xFF444455);
-        et.setTextColor(0xFFCCCCCC); et.setTextSize(12);
-        et.setTypeface(Typeface.MONOSPACE);
-        et.setInputType(InputType.TYPE_CLASS_NUMBER);
-        et.setBackgroundColor(0xFF0D0D16); et.setSingleLine(true);
-        int p = (int)(5*density); et.setPadding(p,p,p,p);
-        return et;
-    }
-
-    private View buildButton(Context ctx, String lbl) {
-        TextView tv = new TextView(ctx); tv.setText(lbl);
-        tv.setTextColor(0xFFCCCCDD); tv.setTextSize(12); tv.setTypeface(Typeface.MONOSPACE);
-        tv.setGravity(Gravity.CENTER); tv.setBackgroundColor(0xFF252540);
-        int pH=(int)(14*density), pV=(int)(6*density);
-        tv.setPadding(pH,pV,pH,pV); tv.setClickable(true); tv.setFocusable(true);
-        return tv;
-    }
-
-    private TextView sectionLabel(Context ctx, String text) {
-        TextView tv = new TextView(ctx); tv.setText(text);
-        tv.setTextColor(0xFF6666AA); tv.setTextSize(10);
-        tv.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
-        int p=(int)(10*density);
-        tv.setPadding(p,(int)(3*density),p,(int)(2*density));
-        return tv;
-    }
-
-    private View separator(Context ctx) {
-        View v = new View(ctx); v.setBackgroundColor(0xFF252530);
-        v.setLayoutParams(new LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, 1));
-        return v;
-    }
-
-    private View vgap(Context ctx, int h) {
-        View v = new View(ctx);
-        v.setLayoutParams(new LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, h));
-        return v;
-    }
-
-    // ── ChromeOverlay ─────────────────────────────────────────────────────────
-
-    private class ChromeOverlay extends View {
-        ChromeOverlay(Context ctx) { super(ctx); setClickable(false); }
-
-        @Override public boolean onTouchEvent(MotionEvent e) { return false; }
-
-        @Override
-        protected void onDraw(Canvas canvas) {
-            int w = getWidth();
-            float tH = titleBarHpx, r = 4f;
-
-            Paint tp = isDragging ? pTitleAct : pTitleBg;
-            canvas.save();
-            canvas.clipRect(0, 0, w, tH);
-            canvas.drawRoundRect(new RectF(0,0,w,tH+r), r, r, tp);
-            canvas.restore();
-
-            // Title text
-            Paint.FontMetrics fm = pTitleTxt.getFontMetrics();
-            canvas.drawText("Canvas Size",
-                10*density,
-                tH/2f - (fm.ascent+fm.descent)/2f,
-                pTitleTxt);
-
-            // Close button
-            float cSz = tH * 0.55f;
-            closeRect.set(
-                w-cSz-6*density, (tH-cSz)/2f,
-                w-6*density,     (tH+cSz)/2f);
-            if (closeHov) canvas.drawRoundRect(closeRect, 2, 2, pCloseBg);
-            pCloseBtn.setColor(closeHov ? 0xFFFFFFFF : 0xFF666688);
-            Paint.FontMetrics xfm = pCloseBtn.getFontMetrics();
-            canvas.drawText("x",
-                closeRect.centerX() - pCloseBtn.measureText("x")/2f,
-                closeRect.centerY() - (xfm.ascent+xfm.descent)/2f,
-                pCloseBtn);
-
-            // Separator bawah title bar
-            Paint sep = new Paint();
-            sep.setColor(0xFF1E1E30);
-            sep.setStyle(Paint.Style.STROKE);
-            sep.setStrokeWidth(1f);
-            canvas.drawLine(0, tH, w, tH, sep);
-        }
-    }
-
-    // ── PresetRowView ─────────────────────────────────────────────────────────
-
-    private class PresetRowView extends View {
-        private final AnimationCanvasView.CanvasPreset preset;
-        private boolean checked = false, hovered = false;
-
-        private final Paint pBg    = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final Paint pHov   = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final Paint pCkBg  = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final Paint pCkBdr = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final Paint pCkMrk = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final Paint pLbl   = new Paint(Paint.ANTI_ALIAS_FLAG);
-
-        PresetRowView(Context ctx, AnimationCanvasView.CanvasPreset p) {
-            super(ctx); this.preset = p;
-            pBg.setColor(0xFF1A1A1A);    pBg.setStyle(Paint.Style.FILL);
-            pHov.setColor(0xFF1F1F2F);   pHov.setStyle(Paint.Style.FILL);
-            pCkBg.setColor(0xFF0D0D16);  pCkBg.setStyle(Paint.Style.FILL);
-            pCkBdr.setColor(0xFF4A4A7A); pCkBdr.setStyle(Paint.Style.STROKE); pCkBdr.setStrokeWidth(1.5f);
-            pCkMrk.setColor(0xFF6666FF); pCkMrk.setStyle(Paint.Style.FILL);
-            pLbl.setColor(0xFFCCCCCC);   pLbl.setTextSize(12*density);
-            pLbl.setTypeface(Typeface.MONOSPACE); pLbl.setAntiAlias(true);
-            setClickable(true);
-        }
-
-        public void setChecked(boolean c) { checked = c; invalidate(); }
-
-        @Override
-        public boolean onTouchEvent(MotionEvent e) {
-            switch (e.getActionMasked()) {
-                case MotionEvent.ACTION_DOWN:
-                case MotionEvent.ACTION_MOVE:
-                    hovered = true; invalidate(); return true;
-                case MotionEvent.ACTION_UP:
-                    hovered = false;
-                    selectedPreset = preset;
-                    refreshPresetHighlights();
-                    if (editW != null) editW.setText("");
-                    if (editH != null) editH.setText("");
-                    return true;
-                case MotionEvent.ACTION_CANCEL:
-                    hovered = false; invalidate(); return true;
-            }
-            return false;
-        }
-
-        @Override
-        protected void onDraw(Canvas canvas) {
-            float w=getWidth(), h=getHeight(), padH=10*density;
-            float bSz=13*density, bY=(h-bSz)/2f, bX=padH;
-
-            canvas.drawRect(0,0,w,h, hovered ? pHov : pBg);
-
-            RectF br = new RectF(bX, bY, bX+bSz, bY+bSz);
-            canvas.drawRoundRect(br, 2,2, pCkBg);
-            canvas.drawRoundRect(br, 2,2, pCkBdr);
-
-            if (checked) {
-                float inn = bSz * 0.28f;
-                canvas.drawRoundRect(
-                    new RectF(br.left+inn, br.top+inn, br.right-inn, br.bottom-inn),
-                    1,1, pCkMrk);
-            }
-
-            Paint.FontMetrics fm = pLbl.getFontMetrics();
-            canvas.drawText(preset.label,
-                bX + bSz + 7*density,
-                h/2f - (fm.ascent+fm.descent)/2f,
-                pLbl);
-        }
-
-        @Override
-        protected void onMeasure(int wSpec, int hSpec) {
-            setMeasuredDimension(MeasureSpec.getSize(wSpec), (int)(28*density));
-        }
+    private int hitPreset(float x, float y) {
+        for (int i=0; i<presetRects.length; i++)
+            if (presetRects[i]!=null && presetRects[i].contains(x,y)) return i;
+        return -1;
     }
 }

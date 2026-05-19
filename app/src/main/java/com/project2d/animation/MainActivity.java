@@ -1,14 +1,17 @@
 package com.project2d.animation;
 
 import android.app.AlertDialog;
+import android.graphics.Typeface;
 import android.os.Build;
 import android.os.Bundle;
+import android.text.InputType;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
 import android.view.WindowManager;
+import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.Toast;
 
@@ -36,14 +39,13 @@ public class MainActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        // ── Fullscreen sebelum setContentView ────────────────────────────────
+        // Fullscreen
         requestWindowFeature(Window.FEATURE_NO_TITLE);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
 
         density = getResources().getDisplayMetrics().density;
 
-        // ── Root layout ───────────────────────────────────────────────────────
         FrameLayout root = new FrameLayout(this);
         root.setBackgroundColor(ImGuiTheme.COLOR_APP_BG);
 
@@ -66,23 +68,38 @@ public class MainActivity extends AppCompatActivity {
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
         fp.topMargin = mH;
         root.addView(floatingWindow, fp);
-        floatingWindow.setPosition(60 * density, 80 * density);
+        floatingWindow.setPosition(60*density, 80*density);
 
-        // Canvas Size floating window
+        // Canvas Size Window — View tunggal seperti FloatingWindow
         canvasSizeWindow = new CanvasSizeWindow(this);
         root.addView(canvasSizeWindow, new FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+
+        // EditText W dan H untuk custom size — ditambah ke root, diposisikan oleh CanvasSizeWindow
+        EditText editW = buildEditText("W");
+        EditText editH = buildEditText("H");
+        root.addView(editW, new FrameLayout.LayoutParams(
             ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        canvasSizeWindow.setPosition(40 * density, mH + 20 * density);
+        root.addView(editH, new FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        editW.setVisibility(View.GONE);
+        editH.setVisibility(View.GONE);
+
+        canvasSizeWindow.attachEditTexts(editW, editH);
+        canvasSizeWindow.setPosition(40*density, mH + 20*density);
         canvasSizeWindow.setCurrentPreset(AnimationCanvasView.CanvasPreset.HD_1280x720);
         canvasSizeWindow.setOnCanvasSizeApplied(new CanvasSizeWindow.OnCanvasSizeApplied() {
             @Override public void onPresetSelected(AnimationCanvasView.CanvasPreset p) {
-                canvasView.setCanvasPreset(p); toast("Canvas: " + p.label);
+                canvasView.setCanvasPreset(p);
+                toast("Canvas: " + p.label);
             }
             @Override public void onCustomSelected(int w, int h) {
-                canvasView.setCustomSize(w, h); toast("Canvas: " + w + "x" + h);
+                canvasView.setCustomSize(w, h);
+                toast("Canvas: " + w + "x" + h);
             }
         });
 
+        // Tambahkan listener agar edittext muncul/hilang saat window show/hide
         // Dropdown overlay — paling atas
         dropdown = new ImGuiDropdown(this);
         dropdown.setVisibility(View.GONE);
@@ -90,17 +107,36 @@ public class MainActivity extends AppCompatActivity {
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
         setContentView(root);
-
         setupMenuBar();
         setupFloatingWindow();
         setupDropdown();
+
+        // Pasang listener show/hide EditText mengikuti visibilitas window
+        canvasSizeWindow.addOnAttachStateChangeListener(new View.OnAttachStateChangeListener() {
+            @Override public void onViewAttachedToWindow(View v) {}
+            @Override public void onViewDetachedFromWindow(View v) {}
+        });
     }
 
-    // ── Fullscreen: sembunyikan status bar & navigation bar ───────────────────
+    private EditText buildEditText(String hint) {
+        EditText et = new EditText(this);
+        et.setHint(hint);
+        et.setHintTextColor(ImGuiTheme.COLOR_TEXT_DISABLED);
+        et.setTextColor(ImGuiTheme.COLOR_TEXT);
+        et.setTextSize(12);
+        et.setTypeface(Typeface.MONOSPACE);
+        et.setInputType(InputType.TYPE_CLASS_NUMBER);
+        et.setBackgroundColor(ImGuiTheme.COLOR_WINDOW_BG);
+        et.setSingleLine(true);
+        int p = (int)(5*density);
+        et.setPadding(p,p,p,p);
+        return et;
+    }
+
+    // ── Fullscreen ────────────────────────────────────────────────────────────
 
     private void hideSystemUI() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            // Android 11+ (API 30+)
             WindowInsetsController ctrl = getWindow().getInsetsController();
             if (ctrl != null) {
                 ctrl.hide(WindowInsets.Type.statusBars() | WindowInsets.Type.navigationBars());
@@ -108,31 +144,24 @@ public class MainActivity extends AppCompatActivity {
                     WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
             }
         } else {
-            // Android 10 ke bawah
             getWindow().getDecorView().setSystemUiVisibility(
                 View.SYSTEM_UI_FLAG_FULLSCREEN
                 | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
                 | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
                 | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
                 | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
-                | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-            );
+                | View.SYSTEM_UI_FLAG_LAYOUT_STABLE);
         }
     }
 
-    @Override
-    protected void onResume() {
-        super.onResume();
-        hideSystemUI();
-    }
+    @Override protected void onResume() { super.onResume(); hideSystemUI(); }
 
-    @Override
-    public void onWindowFocusChanged(boolean hasFocus) {
+    @Override public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
         if (hasFocus) hideSystemUI();
     }
 
-    // ── Menu bar ──────────────────────────────────────────────────────────────
+    // ── Menu ──────────────────────────────────────────────────────────────────
 
     private void setupMenuBar() {
         menuBar.setDropdownListener(new ImGuiMenuBar.OnDropdownRequestListener() {
@@ -169,8 +198,8 @@ public class MainActivity extends AppCompatActivity {
             case "Exit":
                 new AlertDialog.Builder(this)
                     .setTitle("Exit").setMessage("Exit?")
-                    .setPositiveButton("Yes", (d, w) -> finish())
-                    .setNegativeButton("No", null).show();
+                    .setPositiveButton("Yes",(d,w)->finish())
+                    .setNegativeButton("No",null).show();
                 break;
         }
     }
@@ -201,8 +230,7 @@ public class MainActivity extends AppCompatActivity {
 
     private void toast(String m) { Toast.makeText(this, m, Toast.LENGTH_SHORT).show(); }
 
-    @Override
-    public void onBackPressed() {
+    @Override public void onBackPressed() {
         if (dropdown.getVisibility() == View.VISIBLE) {
             dropdown.hide(); menuBar.closeMenu(); return;
         }
