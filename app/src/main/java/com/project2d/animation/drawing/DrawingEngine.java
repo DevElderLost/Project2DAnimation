@@ -9,8 +9,8 @@ import android.graphics.PorterDuff;
 import android.graphics.PorterDuffXfermode;
 
 /**
- * Drawing engine dengan dukungan setBitmapRef untuk sync
- * dengan AnimationProject frame bitmap.
+ * DrawingEngine dengan cancelStroke() untuk membatalkan stroke
+ * tanpa menyimpan ke bitmap — digunakan saat jari kedua turun.
  */
 public class DrawingEngine {
 
@@ -24,16 +24,19 @@ public class DrawingEngine {
     private Bitmap drawBitmap;
     private Canvas drawCanvas;
 
+    // Snapshot bitmap sebelum stroke dimulai — untuk cancel
+    private Bitmap strokeSnapshot = null;
+
     private final Paint brushPaint  = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint eraserPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
 
     private final Path  currentPath = new Path();
-    private float lastX=0f, lastY=0f;
+    private float lastX=0f,lastY=0f;
     private boolean pathStarted=false;
 
     private static final int MAX_UNDO = 20;
     private final Bitmap[] undoStack  = new Bitmap[MAX_UNDO];
-    private int undoTop=0, undoCount=0;
+    private int undoTop=0,undoCount=0;
 
     public DrawingEngine(){ setupPaints(); }
 
@@ -52,34 +55,34 @@ public class DrawingEngine {
 
     // ── Bitmap management ─────────────────────────────────────────────────────
 
-    /** Init bitmap baru (pertama kali atau resize) */
-    public void initBitmap(int w, int h){
+    public void initBitmap(int w,int h){
         if(w<=0||h<=0) return;
         Bitmap nb=Bitmap.createBitmap(w,h,Bitmap.Config.ARGB_8888);
-        if(drawBitmap!=null&&!drawBitmap.isRecycled()){
+        if(drawBitmap!=null&&!drawBitmap.isRecycled())
             new Canvas(nb).drawBitmap(drawBitmap,0,0,null);
-        }
-        drawBitmap=nb;
-        drawCanvas=new Canvas(drawBitmap);
+        drawBitmap=nb; drawCanvas=new Canvas(drawBitmap);
         undoTop=0; undoCount=0;
     }
 
     /**
-     * Sync engine ke bitmap milik AnimationProject.Frame.
-     * Dipanggil setiap ganti frame/layer.
+     * Sync ke bitmap milik AnimationProject.Frame.
+     * Dipanggil setiap ganti frame atau layer.
      */
-    public void setBitmapRef(Bitmap bm, boolean isEmpty){
+    public void setBitmapRef(Bitmap bm,boolean isEmpty){
         if(bm==null) return;
-        drawBitmap=bm;
-        drawCanvas=new Canvas(drawBitmap);
+        drawBitmap=bm; drawCanvas=new Canvas(drawBitmap);
         undoTop=0; undoCount=0;
+        strokeSnapshot=null; pathStarted=false;
     }
 
     // ── Stroke ────────────────────────────────────────────────────────────────
 
     public void startStroke(float x,float y){
         if(drawCanvas==null) return;
-        saveUndo();
+        // Simpan snapshot untuk undo DAN untuk cancel
+        strokeSnapshot=drawBitmap.copy(Bitmap.Config.ARGB_8888,false);
+        // Juga simpan ke undo stack
+        saveUndoFromSnapshot(strokeSnapshot);
         currentPath.reset();
         currentPath.moveTo(x,y);
         lastX=x; lastY=y; pathStarted=true;
@@ -87,7 +90,7 @@ public class DrawingEngine {
 
     public void continueStroke(float x,float y){
         if(!pathStarted||drawCanvas==null) return;
-        float mx=(lastX+x)/2f, my=(lastY+y)/2f;
+        float mx=(lastX+x)/2f,my=(lastY+y)/2f;
         currentPath.quadTo(lastX,lastY,mx,my);
         lastX=x; lastY=y;
         drawStroke();
@@ -99,8 +102,26 @@ public class DrawingEngine {
         drawStroke();
         currentPath.reset();
         pathStarted=false;
-        // Mark frame as non-empty
-        markFrameNotEmpty();
+        strokeSnapshot=null; // commit berhasil, buang snapshot cancel
+        markModified();
+    }
+
+    /**
+     * Batalkan stroke yang sedang berjalan — restore ke snapshot sebelum stroke.
+     * Dipanggil saat jari kedua turun (switch ke navigasi).
+     */
+    public void cancelStroke(){
+        if(!pathStarted) return;
+        currentPath.reset();
+        pathStarted=false;
+        // Restore bitmap ke kondisi sebelum stroke dimulai
+        if(strokeSnapshot!=null&&drawCanvas!=null&&!strokeSnapshot.isRecycled()){
+            drawCanvas.drawColor(Color.TRANSPARENT,PorterDuff.Mode.CLEAR);
+            drawCanvas.drawBitmap(strokeSnapshot,0,0,null);
+            // Rollback undo yang tadi disimpan saat startStroke
+            if(undoCount>0){ undoCount--; undoTop--; }
+        }
+        strokeSnapshot=null;
     }
 
     private void drawStroke(){
@@ -115,29 +136,30 @@ public class DrawingEngine {
         }
     }
 
-    // Callback untuk beri tahu project frame sudah tidak kosong
+    // ── Frame state callback ──────────────────────────────────────────────────
+
     private FrameStateListener frameStateListener;
-    public interface FrameStateListener { void onFrameModified(); }
+    public interface FrameStateListener{ void onFrameModified(); }
     public void setFrameStateListener(FrameStateListener l){ frameStateListener=l; }
-    private void markFrameNotEmpty(){ if(frameStateListener!=null) frameStateListener.onFrameModified(); }
+    private void markModified(){ if(frameStateListener!=null) frameStateListener.onFrameModified(); }
 
     // ── Fill ──────────────────────────────────────────────────────────────────
 
     public void fill(float x,float y){
         if(drawBitmap==null) return;
         saveUndo();
-        int px=(int)x, py=(int)y;
+        int px=(int)x,py=(int)y;
         if(px<0||py<0||px>=drawBitmap.getWidth()||py>=drawBitmap.getHeight()) return;
         int from=drawBitmap.getPixel(px,py);
         if(from==brushColor) return;
         floodFill(drawBitmap,px,py,from,brushColor);
-        markFrameNotEmpty();
+        markModified();
     }
 
     private void floodFill(Bitmap bm,int x,int y,int from,int to){
         int w=bm.getWidth(),h=bm.getHeight();
-        int[] px=new int[w*h]; bm.getPixels(px,0,w,0,0,w,h);
-        int[] stack=new int[w*h*2]; int sp=0;
+        int[]px=new int[w*h]; bm.getPixels(px,0,w,0,0,w,h);
+        int[]stack=new int[w*h*2]; int sp=0;
         stack[sp++]=x; stack[sp++]=y;
         while(sp>0){
             int cy=stack[--sp],cx=stack[--sp];
@@ -156,7 +178,11 @@ public class DrawingEngine {
 
     private void saveUndo(){
         if(drawBitmap==null) return;
-        Bitmap snap=drawBitmap.copy(Bitmap.Config.ARGB_8888,false);
+        saveUndoFromSnapshot(drawBitmap.copy(Bitmap.Config.ARGB_8888,false));
+    }
+
+    private void saveUndoFromSnapshot(Bitmap snap){
+        if(snap==null) return;
         undoStack[undoTop%MAX_UNDO]=snap;
         undoTop++; if(undoCount<MAX_UNDO) undoCount++;
     }
@@ -167,7 +193,7 @@ public class DrawingEngine {
         if(!canUndo()||drawBitmap==null) return;
         undoTop--; undoCount--;
         Bitmap snap=undoStack[undoTop%MAX_UNDO];
-        if(snap!=null){
+        if(snap!=null&&!snap.isRecycled()){
             drawCanvas.drawColor(Color.TRANSPARENT,PorterDuff.Mode.CLEAR);
             drawCanvas.drawBitmap(snap,0,0,null);
         }
