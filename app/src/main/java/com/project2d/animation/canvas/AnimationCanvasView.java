@@ -2,11 +2,7 @@ package com.project2d.animation.canvas;
 
 import android.animation.ValueAnimator;
 import android.content.Context;
-import android.graphics.Bitmap;
-import android.graphics.Canvas;
-import android.graphics.Matrix;
-import android.graphics.Paint;
-import android.graphics.RectF;
+import android.graphics.*;
 import android.util.AttributeSet;
 import android.view.MotionEvent;
 import android.view.View;
@@ -19,50 +15,52 @@ import com.project2d.animation.ui.ImGuiTheme;
 public class AnimationCanvasView extends View {
 
     public enum CanvasPreset {
-        HD_1280x720("HD 1280x720",    1280,  720),
-        FHD_1920x1080("FHD 1920x1080",1920, 1080),
-        SQUARE_1080("Square 1080x1080",1080, 1080),
-        A4_PORTRAIT("A4 Portrait",     794, 1123),
-        SMALL_640x480("Small 640x480", 640,  480),
-        CUSTOM("Custom", 0, 0);
+        HD_1280x720("HD 1280x720",    1280, 720),
+        FHD_1920x1080("FHD 1920x1080",1920,1080),
+        SQUARE_1080("Square 1080x1080",1080,1080),
+        A4_PORTRAIT("A4 Portrait",     794,1123),
+        SMALL_640x480("Small 640x480", 640, 480),
+        CUSTOM("Custom",0,0);
         public final String label;
-        public int width, height;
+        public int width,height;
         CanvasPreset(String l,int w,int h){label=l;width=w;height=h;}
     }
 
-    private final Paint paintWS     = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint paintCanvas = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint paintBorder = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint paintShadow = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint paintGrid   = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint paintHud    = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint paintHudBg  = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint paintDraw   = new Paint(Paint.ANTI_ALIAS_FLAG|Paint.FILTER_BITMAP_FLAG);
+    private final Paint pWS   =new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint pC    =new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint pBdr  =new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint pSh   =new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint pGrid =new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint pHud  =new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint pHudBg=new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint pDraw =new Paint(Paint.ANTI_ALIAS_FLAG|Paint.FILTER_BITMAP_FLAG);
 
-    private int docW=1280, docH=720;
+    private int docW=1280,docH=720;
     private CanvasPreset currentPreset=CanvasPreset.HD_1280x720;
     private boolean showGrid=false;
 
-    private final Matrix matrix               = new Matrix();
-    private final Matrix matrixAtGestureStart = new Matrix();
-    private final Matrix invertMatrix         = new Matrix();
-    private float currentScale=1f, currentAngle=0f;
-    private static final float MIN_SCALE=0.05f, MAX_SCALE=32f, SNAP_THRESH=5f;
+    private final Matrix mat    =new Matrix();
+    private final Matrix matGS  =new Matrix();
+    private final Matrix matInv =new Matrix();
+    private float scale=1f,angle=0f;
 
+    private static final float MIN_S=0.05f,MAX_S=32f,SNAP=5f;
+
+    // ── Gesture state ─────────────────────────────────────────────────────────
+    // FIX: pisahkan state dua-jari dari satu-jari dengan ketat
     private boolean inTwoFinger=false;
-    private float startDist=0f, startAngle=0f, startMidX=0f, startMidY=0f;
-    private long  lastTapMs=0L;
-    private float lastTapX=0f, lastTapY=0f;
-    private static final long DTAP_MS=300L;
-    private static final float DTAP_SLOP=60f;
-    private boolean showAngleHint=false;
-    private long angleHintUntil=0L;
+    private float sDist=0f,sAngle=0f,sMidX=0f,sMidY=0f;
 
-    private DrawingEngine    engine;
+    // Double-tap
+    private long tapMs=0L; private float tapX=0f,tapY=0f;
+    private static final long TAP_MS=300L,TAP_SLOP=60;
+
+    // HUD
+    private boolean showAngle=false; private long angleUntil=0L;
+
+    private DrawingEngine engine;
     private AnimationProject project;
     private boolean isDrawing=false;
-
-    // Playback mode — saat playing, gambar composite bukan engine bitmap
     private boolean playbackMode=false;
 
     public AnimationCanvasView(Context c)                {super(c);init();}
@@ -70,43 +68,36 @@ public class AnimationCanvasView extends View {
 
     private void init(){
         float d=getResources().getDisplayMetrics().density;
-        paintWS.setColor(ImGuiTheme.COLOR_APP_BG);         paintWS.setStyle(Paint.Style.FILL);
-        paintCanvas.setColor(ImGuiTheme.COLOR_CANVAS_BG);  paintCanvas.setStyle(Paint.Style.FILL);
-        paintBorder.setColor(ImGuiTheme.COLOR_CANVAS_BORDER); paintBorder.setStyle(Paint.Style.STROKE); paintBorder.setStrokeWidth(1.5f);
-        paintShadow.setColor(0x55000000); paintShadow.setStyle(Paint.Style.FILL);
-        paintGrid.setColor(0xFFDDDDDD);   paintGrid.setStyle(Paint.Style.STROKE); paintGrid.setStrokeWidth(0.5f);
-        paintHud.setColor(0xEEFFFFFF);    paintHud.setTextSize(12*d); paintHud.setAntiAlias(true);
-        paintHudBg.setColor(0xBB000000);  paintHudBg.setStyle(Paint.Style.FILL);
-        paintDraw.setAntiAlias(true); paintDraw.setFilterBitmap(true);
+        pWS.setColor(ImGuiTheme.COLOR_APP_BG);          pWS.setStyle(Paint.Style.FILL);
+        pC.setColor(ImGuiTheme.COLOR_CANVAS_BG);         pC.setStyle(Paint.Style.FILL);
+        pBdr.setColor(ImGuiTheme.COLOR_CANVAS_BORDER);   pBdr.setStyle(Paint.Style.STROKE); pBdr.setStrokeWidth(1.5f);
+        pSh.setColor(0x55000000);  pSh.setStyle(Paint.Style.FILL);
+        pGrid.setColor(0xFFDDDDDD);pGrid.setStyle(Paint.Style.STROKE);pGrid.setStrokeWidth(0.5f);
+        pHud.setColor(0xEEFFFFFF); pHud.setTextSize(12*d); pHud.setAntiAlias(true);
+        pHudBg.setColor(0xBB000000);pHudBg.setStyle(Paint.Style.FILL);
+        pDraw.setAntiAlias(true);  pDraw.setFilterBitmap(true);
         setClickable(true); setFocusable(true);
     }
 
-    public void setDrawingEngine(DrawingEngine e){ this.engine=e; }
-    public void setProject(AnimationProject p)   { this.project=p; }
+    public void setDrawingEngine(DrawingEngine e){ engine=e; }
+    public void setProject(AnimationProject p)   { project=p; }
     public void setPlaybackMode(boolean b)        { playbackMode=b; invalidate(); }
+    public CanvasPreset getCurrentPreset()        { return currentPreset; }
 
     public void setCanvasPreset(CanvasPreset p){
-        currentPreset=p; docW=p.width; docH=p.height;
-        if(engine!=null&&engine.getDrawBitmap()==null) engine.initBitmap(docW,docH);
-        fitToView(); invalidate();
+        currentPreset=p; docW=p.width; docH=p.height; fitToView(); invalidate();
     }
     public void setCustomSize(int w,int h){
-        currentPreset=CanvasPreset.CUSTOM; docW=w; docH=h;
-        if(engine!=null&&engine.getDrawBitmap()==null) engine.initBitmap(docW,docH);
-        fitToView(); invalidate();
+        currentPreset=CanvasPreset.CUSTOM; docW=w; docH=h; fitToView(); invalidate();
     }
     public void setShowGrid(boolean s){showGrid=s;invalidate();}
-    public CanvasPreset getCurrentPreset(){return currentPreset;}
-    public int getCanvasDocW(){return docW;}
-    public int getCanvasDocH(){return docH;}
 
     public void fitToView(){
         if(getWidth()==0||getHeight()==0||docW==0||docH==0) return;
-        float vw=getWidth(),vh=getHeight();
-        float s=Math.min(vw*0.85f/docW,vh*0.85f/docH);
-        matrix.reset(); matrix.postScale(s,s);
-        matrix.postTranslate((vw-docW*s)/2f,(vh-docH*s)/2f);
-        currentScale=s; currentAngle=0f; invalidate();
+        float vw=getWidth(),vh=getHeight(),s=Math.min(vw*0.85f/docW,vh*0.85f/docH);
+        mat.reset(); mat.postScale(s,s);
+        mat.postTranslate((vw-docW*s)/2f,(vh-docH*s)/2f);
+        scale=s; angle=0f; invalidate();
     }
 
     @Override protected void onSizeChanged(int w,int h,int ow,int oh){
@@ -116,162 +107,200 @@ public class AnimationCanvasView extends View {
     // ── Touch ─────────────────────────────────────────────────────────────────
 
     @Override public boolean onTouchEvent(MotionEvent e){
+        if(playbackMode) return true;
         int count=e.getPointerCount(), action=e.getActionMasked();
-        if(playbackMode) return true; // no drawing during playback
 
-        if(count>=2){
-            if(isDrawing){ endDraw(e.getX(0),e.getY(0)); isDrawing=false; }
-            handleNavGesture(action,e); return true;
-        }
+        switch(action){
+            case MotionEvent.ACTION_DOWN:
+                // Satu jari pertama: reset dua jari, cek double tap, mulai gambar
+                inTwoFinger=false;
+                checkDTap(e.getX(0),e.getY(0));
+                startDraw(e.getX(0),e.getY(0));
+                break;
 
-        if(!inTwoFinger){
-            switch(action){
-                case MotionEvent.ACTION_DOWN:
-                    checkDoubleTap(e.getX(0),e.getY(0));
-                    if(engine!=null){
-                        float[] doc=viewToDoc(e.getX(0),e.getY(0));
-                        if(isInsideDoc(doc[0],doc[1])){
-                            if(engine.getCurrentTool()==DrawingEngine.Tool.FILL){
-                                engine.fill(doc[0],doc[1]); invalidate();
-                            } else {
-                                engine.startStroke(doc[0],doc[1]); isDrawing=true; invalidate();
-                            }
-                        }
-                    } break;
-                case MotionEvent.ACTION_MOVE:
-                    if(isDrawing&&engine!=null){
-                        for(int i=0;i<e.getHistorySize();i++){
-                            float[] d=viewToDoc(e.getHistoricalX(0,i),e.getHistoricalY(0,i));
-                            engine.continueStroke(d[0],d[1]);
-                        }
-                        float[] d=viewToDoc(e.getX(0),e.getY(0));
-                        engine.continueStroke(d[0],d[1]); invalidate();
-                    } break;
-                case MotionEvent.ACTION_UP: case MotionEvent.ACTION_CANCEL:
-                    if(isDrawing&&engine!=null){ endDraw(e.getX(0),e.getY(0)); isDrawing=false; invalidate(); }
-                    break;
-            }
+            case MotionEvent.ACTION_POINTER_DOWN:
+                // Jari kedua: batalkan gambar, mulai navigasi
+                if(count==2){
+                    if(isDrawing){ engine.endStroke(vToD(e.getX(0),e.getY(0))[0],vToD(e.getX(0),e.getY(0))[1]); isDrawing=false; }
+                    inTwoFinger=false;
+                    beginTwo(e);
+                }
+                break;
+
+            case MotionEvent.ACTION_MOVE:
+                if(inTwoFinger && count>=2){
+                    updateTwo(e);
+                } else if(!inTwoFinger && isDrawing){
+                    continueDraw(e);
+                }
+                break;
+
+            case MotionEvent.ACTION_POINTER_UP:
+                // *** FIX: snap HANYA di sini, bukan ACTION_UP ***
+                if(inTwoFinger){
+                    inTwoFinger=false;
+                    snapAngle(); // snap saat dua jari selesai
+                }
+                // Reset ke single-pan mode setelah dua jari
+                if(count==2){
+                    int keep=(e.getActionIndex()==0)?1:0;
+                    // Tidak ada single pan — hanya stop drawing
+                    isDrawing=false;
+                }
+                break;
+
+            case MotionEvent.ACTION_UP:
+                // *** FIX: TIDAK memanggil snapAngle di sini ***
+                if(!inTwoFinger && isDrawing){
+                    endDraw(e.getX(0),e.getY(0));
+                }
+                isDrawing=false;
+                break;
+
+            case MotionEvent.ACTION_CANCEL:
+                inTwoFinger=false; isDrawing=false; break;
         }
         return true;
     }
 
+    private void startDraw(float vx,float vy){
+        if(engine==null) return;
+        float[] d=vToD(vx,vy);
+        if(!inDoc(d[0],d[1])) return;
+        if(engine.getCurrentTool()==DrawingEngine.Tool.FILL){
+            engine.fill(d[0],d[1]); invalidate();
+        } else {
+            engine.startStroke(d[0],d[1]); isDrawing=true; invalidate();
+        }
+    }
+
+    private void continueDraw(MotionEvent e){
+        if(engine==null) return;
+        for(int i=0;i<e.getHistorySize();i++){
+            float[]d=vToD(e.getHistoricalX(0,i),e.getHistoricalY(0,i));
+            engine.continueStroke(d[0],d[1]);
+        }
+        float[]d=vToD(e.getX(0),e.getY(0)); engine.continueStroke(d[0],d[1]); invalidate();
+    }
+
     private void endDraw(float vx,float vy){
         if(engine==null) return;
-        float[] d=viewToDoc(vx,vy); engine.endStroke(d[0],d[1]);
-        // Mark project frame as modified
-        if(project!=null){
-            AnimationProject.Frame f=project.getCurrentFrame();
-            if(f!=null) f.isEmpty=false;
-        }
+        float[]d=vToD(vx,vy); engine.endStroke(d[0],d[1]);
+        if(project!=null){ AnimationProject.Frame f=project.getCurrentFrame(); if(f!=null) f.isEmpty=false; }
+        invalidate();
     }
 
-    private float[] viewToDoc(float vx,float vy){
-        if(!matrix.invert(invertMatrix)) return new float[]{vx,vy};
-        float[] pts={vx,vy}; invertMatrix.mapPoints(pts); return pts;
+    // ── Two-finger nav ────────────────────────────────────────────────────────
+
+    private void beginTwo(MotionEvent e){
+        inTwoFinger=true;
+        sDist=span(e); sAngle=fAngle(e); sMidX=midX(e); sMidY=midY(e);
+        matGS.set(mat);
     }
 
-    private boolean isInsideDoc(float dx,float dy){ return dx>=0&&dy>=0&&dx<=docW&&dy<=docH; }
-
-    // ── Nav gesture ───────────────────────────────────────────────────────────
-
-    private void handleNavGesture(int action,MotionEvent e){
-        switch(action){
-            case MotionEvent.ACTION_POINTER_DOWN:
-                if(e.getPointerCount()==2){ inTwoFinger=false; beginTwoFinger(e); } break;
-            case MotionEvent.ACTION_MOVE:
-                if(!inTwoFinger) beginTwoFinger(e); else updateTwoFinger(e); break;
-            case MotionEvent.ACTION_POINTER_UP:
-                if(inTwoFinger){ inTwoFinger=false; trySnapAngle(); } break;
-            case MotionEvent.ACTION_UP: case MotionEvent.ACTION_CANCEL:
-                inTwoFinger=false; break;
-        }
+    private void updateTwo(MotionEvent e){
+        float nd=span(e),na=fAngle(e),nmx=midX(e),nmy=midY(e);
+        if(sDist<1f) return;
+        float base=mScale(matGS);
+        float tgt=Math.max(MIN_S,Math.min(MAX_S,base*(nd/sDist)));
+        float sd=tgt/base, rd=normD(na-sAngle);
+        mat.set(matGS);
+        mat.postTranslate(nmx-sMidX,nmy-sMidY);
+        mat.postRotate(rd,nmx,nmy);
+        mat.postScale(sd,sd,nmx,nmy);
+        scale=tgt; angle=normA(mAngle(mat));
+        showAngle=true; angleUntil=System.currentTimeMillis()+1500L;
+        invalidate();
     }
 
-    private void beginTwoFinger(MotionEvent e){
-        inTwoFinger=true; startDist=pSpan(e); startAngle=pAngle(e);
-        startMidX=pMidX(e); startMidY=pMidY(e); matrixAtGestureStart.set(matrix);
-    }
-    private void updateTwoFinger(MotionEvent e){
-        float nd=pSpan(e),na=pAngle(e),nmx=pMidX(e),nmy=pMidY(e);
-        if(startDist<1f) return;
-        float base=mScale(matrixAtGestureStart);
-        float tgt=Math.max(MIN_SCALE,Math.min(MAX_SCALE,base*(nd/startDist)));
-        float sd=tgt/base, rd=normDelta(na-startAngle);
-        matrix.set(matrixAtGestureStart);
-        matrix.postTranslate(nmx-startMidX,nmy-startMidY);
-        matrix.postRotate(rd,nmx,nmy); matrix.postScale(sd,sd,nmx,nmy);
-        currentScale=tgt; currentAngle=normAngle(mAngle(matrix));
-        showAngleHint=true; angleHintUntil=System.currentTimeMillis()+1800L; invalidate();
-    }
-    private void trySnapAngle(){
-        float a=normAngle(mAngle(matrix));
+    private void snapAngle(){
+        float a=normA(mAngle(mat));
         for(float c:new float[]{0f,90f,180f,270f,360f}){
-            if(Math.abs(normDelta(a-c))<=SNAP_THRESH){ float[]pv=canvasCenter(); animSnap((c%360f)-a,pv[0],pv[1]); return; }
+            float diff=Math.abs(normD(a-c));
+            if(diff<=SNAP){
+                float delta=normD((c%360f)-a);
+                float[]pv=cCenter();
+                animSnap(delta,pv[0],pv[1]); return;
+            }
         }
     }
+
     private void animSnap(float delta,float px,float py){
-        if(Math.abs(delta)<0.01f){currentAngle=normAngle(mAngle(matrix));return;}
-        float[]prev={0f}; ValueAnimator a=ValueAnimator.ofFloat(0f,delta); a.setDuration(150); a.setInterpolator(new DecelerateInterpolator());
-        a.addUpdateListener(va->{float v=(float)va.getAnimatedValue(),s=v-prev[0];prev[0]=v;matrix.postRotate(s,px,py);currentAngle=normAngle(mAngle(matrix));invalidate();}); a.start();
+        if(Math.abs(delta)<0.01f){angle=normA(mAngle(mat));return;}
+        float[]prev={0f};
+        ValueAnimator a=ValueAnimator.ofFloat(0f,delta);
+        a.setDuration(150); a.setInterpolator(new DecelerateInterpolator());
+        a.addUpdateListener(va->{
+            float v=(float)va.getAnimatedValue(),s=v-prev[0]; prev[0]=v;
+            mat.postRotate(s,px,py); angle=normA(mAngle(mat)); invalidate();
+        }); a.start();
     }
-    private void checkDoubleTap(float x,float y){
-        long now=System.currentTimeMillis(); float dx=x-lastTapX,dy=y-lastTapY;
-        if(now-lastTapMs<DTAP_MS&&dx*dx+dy*dy<DTAP_SLOP*DTAP_SLOP){animReset();lastTapMs=0;}
-        else{lastTapMs=now;lastTapX=x;lastTapY=y;}
+
+    private void checkDTap(float x,float y){
+        long now=System.currentTimeMillis(); float dx=x-tapX,dy=y-tapY;
+        if(now-tapMs<TAP_MS&&dx*dx+dy*dy<TAP_SLOP*TAP_SLOP){ animReset(); tapMs=0; }
+        else{ tapMs=now; tapX=x; tapY=y; }
     }
+
     private void animReset(){
         if(getWidth()==0||getHeight()==0||docW==0||docH==0) return;
         float vw=getWidth(),vh=getHeight(),s=Math.min(vw*0.85f/docW,vh*0.85f/docH);
         Matrix tgt=new Matrix(); tgt.postScale(s,s); tgt.postTranslate((vw-docW*s)/2f,(vh-docH*s)/2f);
-        float[]sv=new float[9],tv=new float[9]; matrix.getValues(sv); tgt.getValues(tv);
+        float[]sv=new float[9],tv=new float[9]; mat.getValues(sv); tgt.getValues(tv);
         ValueAnimator a=ValueAnimator.ofFloat(0f,1f); a.setDuration(260); a.setInterpolator(new DecelerateInterpolator());
-        a.addUpdateListener(va->{float t=(float)va.getAnimatedValue(),iv[]=new float[9];for(int i=0;i<9;i++)iv[i]=sv[i]+(tv[i]-sv[i])*t;matrix.setValues(iv);currentScale=sv[0]+(s-sv[0])*t;currentAngle=0f;invalidate();}); a.start();
+        a.addUpdateListener(va->{ float t=(float)va.getAnimatedValue(),iv[]=new float[9];
+            for(int i=0;i<9;i++)iv[i]=sv[i]+(tv[i]-sv[i])*t;
+            mat.setValues(iv); scale=sv[0]+(s-sv[0])*t; angle=0f; invalidate(); }); a.start();
     }
 
     // ── Draw ──────────────────────────────────────────────────────────────────
 
     @Override protected void onDraw(Canvas canvas){
         float vw=getWidth(),vh=getHeight();
-        canvas.drawRect(0,0,vw,vh,paintWS);
+        canvas.drawRect(0,0,vw,vh,pWS);
         if(docW==0||docH==0) return;
-        canvas.save(); canvas.concat(matrix);
-        canvas.drawRect(8,8,docW+8,docH+8,paintShadow);
-        canvas.drawRect(0,0,docW,docH,paintCanvas);
-
-        // Gambar bitmap: playback mode → composite, edit mode → engine bitmap
+        canvas.save(); canvas.concat(mat);
+        canvas.drawRect(8,8,docW+8,docH+8,pSh);
+        canvas.drawRect(0,0,docW,docH,pC);
         Bitmap bm=null;
-        if(playbackMode&&project!=null){
-            bm=project.compositeFrame(project.getCurrentFrameIdx());
-        } else if(engine!=null){
-            bm=engine.getDrawBitmap();
-        }
-        if(bm!=null&&!bm.isRecycled()) canvas.drawBitmap(bm,0,0,paintDraw);
-
-        if(showGrid){ float gs=32f; for(float x=0;x<=docW;x+=gs)canvas.drawLine(x,0,x,docH,paintGrid); for(float y=0;y<=docH;y+=gs)canvas.drawLine(0,y,docW,y,paintGrid); }
-        canvas.drawRect(0,0,docW,docH,paintBorder);
+        if(playbackMode&&project!=null) bm=project.compositeFrame(project.getCurrentFrameIdx());
+        else if(engine!=null) bm=engine.getDrawBitmap();
+        if(bm!=null&&!bm.isRecycled()) canvas.drawBitmap(bm,0,0,pDraw);
+        if(showGrid){ float gs=32f;
+            for(float x=0;x<=docW;x+=gs)canvas.drawLine(x,0,x,docH,pGrid);
+            for(float y=0;y<=docH;y+=gs)canvas.drawLine(0,y,docW,y,pGrid); }
+        canvas.drawRect(0,0,docW,docH,pBdr);
         canvas.restore();
         drawHud(canvas,vw,vh);
     }
 
-    private void drawHud(Canvas canvas,float vw,float vh){
+    private void drawHud(Canvas c,float vw,float vh){
         float d=getResources().getDisplayMetrics().density;
-        hudPill(canvas,String.format("%.0f%%",currentScale*100f),vw-8*d,vh-8*d,d);
-        if(showAngleHint&&System.currentTimeMillis()<angleHintUntil){ float disp=currentAngle>180f?currentAngle-360f:currentAngle; hudPill(canvas,String.format("%.1f\u00b0",disp),vw-8*d,vh-30*d,d); invalidate(); }
-        if(playbackMode){ hudPill(canvas,"PLAY",vw-8*d,vh-52*d,d); }
+        hud(c,String.format("%.0f%%",scale*100f),vw-8*d,vh-8*d,d);
+        if(showAngle&&System.currentTimeMillis()<angleUntil){
+            float disp=angle>180f?angle-360f:angle; hud(c,String.format("%.1f°",disp),vw-8*d,vh-30*d,d); invalidate(); }
+        if(playbackMode) hud(c,"▶ PLAY",vw-8*d,vh-52*d,d);
     }
-    private void hudPill(Canvas canvas,String text,float right,float bottom,float d){
-        float pad=5*d,tw=paintHud.measureText(text); Paint.FontMetrics fm=paintHud.getFontMetrics(); float th=-fm.ascent;
-        float x=right-tw-pad*2,y=bottom-pad;
-        canvas.drawRoundRect(new RectF(x-pad,y-th-pad,x+tw+pad,y+pad),6,6,paintHudBg);
-        canvas.drawText(text,x,y,paintHud);
+
+    private void hud(Canvas c,String t,float r,float b,float d){
+        float pad=5*d,tw=pHud.measureText(t); Paint.FontMetrics fm=pHud.getFontMetrics(); float th=-fm.ascent;
+        float x=r-tw-pad*2,y=b-pad;
+        c.drawRoundRect(new RectF(x-pad,y-th-pad,x+tw+pad,y+pad),6,6,pHudBg);
+        c.drawText(t,x,y,pHud);
     }
-    private static float pMidX(MotionEvent e){return(e.getX(0)+e.getX(1))/2f;}
-    private static float pMidY(MotionEvent e){return(e.getY(0)+e.getY(1))/2f;}
-    private static float pSpan(MotionEvent e){float dx=e.getX(0)-e.getX(1),dy=e.getY(0)-e.getY(1);return(float)Math.sqrt(dx*dx+dy*dy);}
-    private static float pAngle(MotionEvent e){return(float)Math.toDegrees(Math.atan2(e.getY(0)-e.getY(1),e.getX(0)-e.getX(1)));}
+
+    private float[]vToD(float vx,float vy){
+        if(!mat.invert(matInv)) return new float[]{vx,vy};
+        float[]p={vx,vy}; matInv.mapPoints(p); return p;
+    }
+    private boolean inDoc(float dx,float dy){return dx>=0&&dy>=0&&dx<=docW&&dy<=docH;}
+    private static float midX(MotionEvent e){return(e.getX(0)+e.getX(1))/2f;}
+    private static float midY(MotionEvent e){return(e.getY(0)+e.getY(1))/2f;}
+    private static float span(MotionEvent e){float dx=e.getX(0)-e.getX(1),dy=e.getY(0)-e.getY(1);return(float)Math.sqrt(dx*dx+dy*dy);}
+    private static float fAngle(MotionEvent e){return(float)Math.toDegrees(Math.atan2(e.getY(0)-e.getY(1),e.getX(0)-e.getX(1)));}
     private static float mScale(Matrix m){float[]v=new float[9];m.getValues(v);return(float)Math.sqrt(v[0]*v[0]+v[3]*v[3]);}
     private static float mAngle(Matrix m){float[]v=new float[9];m.getValues(v);return(float)Math.toDegrees(Math.atan2(v[3],v[0]));}
-    private static float normAngle(float a){return((a%360f)+360f)%360f;}
-    private static float normDelta(float d){d=d%360f;if(d>180f)d-=360f;if(d<-180f)d+=360f;return d;}
-    private float[] canvasCenter(){float[]p={docW/2f,docH/2f};matrix.mapPoints(p);return p;}
+    private static float normA(float a){return((a%360f)+360f)%360f;}
+    private static float normD(float d){d=d%360f;if(d>180f)d-=360f;if(d<-180f)d+=360f;return d;}
+    private float[]cCenter(){float[]p={docW/2f,docH/2f};mat.mapPoints(p);return p;}
 }
