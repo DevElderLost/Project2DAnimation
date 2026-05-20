@@ -162,7 +162,21 @@ public class AnimationProject {
     }
 
     public void addLayer() {
-        layers.add(new Layer("Layer " + (layers.size() + 1), frameCount, docW, docH));
+        addLayer(false);
+    }
+
+    public void addLayer(boolean isBackground) {
+        String name = isBackground
+            ? "BG " + (layers.size() + 1)
+            : "Layer " + (layers.size() + 1);
+        Layer l = new Layer(name, frameCount, docW, docH);
+        if (isBackground) {
+            // Background layer ditambah di paling bawah (index 0)
+            layers.add(0, l);
+            if (currentLayer >= 0) currentLayer++; // shift index agar tetap pointing layer yang sama
+        } else {
+            layers.add(l);
+        }
     }
 
     public void removeLayer(int idx) {
@@ -200,3 +214,6 @@ public class AnimationProject {
             }
     }
 }
+
+// PATCH: tambah di bawah method addLayer() yang sudah ada
+// Ini tidak bisa langsung append, jadi kita overwrite addLayer()

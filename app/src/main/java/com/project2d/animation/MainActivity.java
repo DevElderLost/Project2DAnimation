@@ -213,7 +213,10 @@ public class MainActivity extends AppCompatActivity {
             @Override public void onLayerChanged(int li){project.setCurrentLayer(li);syncEngineToFrame();canvasView.invalidate();timelineView.invalidate();}
             @Override public void onFrameAdded(){timelineView.invalidate();}
             @Override public void onFrameRemoved(){syncEngineToFrame();canvasView.invalidate();timelineView.invalidate();}
-            @Override public void onLayerAdded(){timelineView.invalidate();}
+            @Override public void onLayerAdded(boolean isBg){
+                project.addLayer(isBg); syncEngineToFrame();
+                canvasView.invalidate(); timelineView.invalidate();
+            }
             @Override public void onLayerRemoved(int li){syncEngineToFrame();canvasView.invalidate();timelineView.invalidate();}
             @Override public void onPlayStateChanged(boolean playing){canvasView.setPlaybackMode(playing);}
             @Override public void onOnionSkinLayerToggled(int li){
