@@ -61,10 +61,45 @@ public class AnimationProject {
     }
 
     // ── Layer ─────────────────────────────────────────────────────────────────
+    /** Blend mode untuk compositing layer */
+    public enum BlendMode {
+        NORMAL("Normal"),
+        MULTIPLY("Multiply"),
+        ADD("Add"),
+        SCREEN("Screen"),
+        OVERLAY("Overlay"),
+        DARKEN("Darken"),
+        LIGHTEN("Lighten"),
+        COLOR_DODGE("Color Dodge"),
+        COLOR_BURN("Color Burn"),
+        HARD_LIGHT("Hard Light"),
+        SOFT_LIGHT("Soft Light"),
+        DIFFERENCE("Difference"),
+        EXCLUSION("Exclusion");
+
+        public final String label;
+        BlendMode(String l){ label=l; }
+
+        /** Konversi ke PorterDuff.Mode yang tersedia di Android */
+        public android.graphics.PorterDuff.Mode toPorterDuff(){
+            switch(this){
+                case MULTIPLY:    return android.graphics.PorterDuff.Mode.MULTIPLY;
+                case ADD:         return android.graphics.PorterDuff.Mode.ADD;
+                case SCREEN:      return android.graphics.PorterDuff.Mode.SCREEN;
+                case OVERLAY:     return android.graphics.PorterDuff.Mode.OVERLAY;
+                case DARKEN:      return android.graphics.PorterDuff.Mode.DARKEN;
+                case LIGHTEN:     return android.graphics.PorterDuff.Mode.LIGHTEN;
+                case DIFFERENCE:  return android.graphics.PorterDuff.Mode.XOR; // closest
+                default:          return android.graphics.PorterDuff.Mode.SRC_OVER;
+            }
+        }
+    }
+
     public static class Layer {
-        public String  name;
-        public boolean visible  = true;
-        public float   opacity  = 1f;
+        public String    name;
+        public boolean   visible   = true;
+        public float     opacity   = 1f;
+        public BlendMode blendMode = BlendMode.NORMAL;
         public final List<Frame> frames = new ArrayList<>();
 
         public Layer(String name, int frameCount, int docW, int docH) {
@@ -204,17 +239,20 @@ public class AnimationProject {
         }
     }
 
-    /** Composite semua layer untuk playback */
+    /** Composite semua layer untuk playback dengan blend mode */
     public Bitmap compositeFrame(int frameIdx){
         Bitmap out=Bitmap.createBitmap(docW,docH,Bitmap.Config.ARGB_8888);
         Canvas c=new Canvas(out); c.drawColor(Color.WHITE);
-        Paint p=new Paint(Paint.ANTI_ALIAS_FLAG|Paint.FILTER_BITMAP_FLAG);
         for(Layer l:layers){
             if(!l.visible) continue;
             Frame f=l.getFrame(frameIdx);
             if(f==null||f.isEmpty||f.bitmap==null||f.bitmap.isRecycled()) continue;
+            Paint p=new Paint(Paint.ANTI_ALIAS_FLAG|Paint.FILTER_BITMAP_FLAG);
             p.setAlpha((int)(l.opacity*255));
+            if(l.blendMode!=BlendMode.NORMAL)
+                p.setXfermode(new android.graphics.PorterDuffXfermode(l.blendMode.toPorterDuff()));
             c.drawBitmap(f.bitmap,0,0,p);
+            p.setXfermode(null);
         }
         return out;
     }
@@ -223,13 +261,16 @@ public class AnimationProject {
     public Bitmap compositeFrameAtTick(int tick){
         Bitmap out=Bitmap.createBitmap(docW,docH,Bitmap.Config.ARGB_8888);
         Canvas c=new Canvas(out); c.drawColor(Color.WHITE);
-        Paint p=new Paint(Paint.ANTI_ALIAS_FLAG|Paint.FILTER_BITMAP_FLAG);
         for(Layer l:layers){
             if(!l.visible) continue;
             Frame f=l.getFrameAtTick(tick);
             if(f==null||f.isEmpty||f.bitmap==null||f.bitmap.isRecycled()) continue;
+            Paint p=new Paint(Paint.ANTI_ALIAS_FLAG|Paint.FILTER_BITMAP_FLAG);
             p.setAlpha((int)(l.opacity*255));
+            if(l.blendMode!=BlendMode.NORMAL)
+                p.setXfermode(new android.graphics.PorterDuffXfermode(l.blendMode.toPorterDuff()));
             c.drawBitmap(f.bitmap,0,0,p);
+            p.setXfermode(null);
         }
         return out;
     }

@@ -240,7 +240,11 @@ public class MainActivity extends AppCompatActivity {
                 }
             }
             @Override public void onExposureChanged(int frameIdx, int newExposure){
-                // Exposure berubah — update timeline visual saja, tidak perlu sync engine
+                timelineView.invalidate();
+            }
+            @Override public void onBlendModeChanged(int layerIdx, com.project2d.animation.timeline.AnimationProject.BlendMode mode){
+                // Blend mode berubah — redraw canvas (composite ulang)
+                canvasView.invalidate();
                 timelineView.invalidate();
             }
         });
