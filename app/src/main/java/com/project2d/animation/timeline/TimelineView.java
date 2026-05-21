@@ -10,6 +10,7 @@ import android.view.View;
 
 import com.project2d.animation.drawing.OnionSkinSettings;
 import com.project2d.animation.ui.ImGuiTheme;
+import com.project2d.animation.timeline.AnimationProject.Layer;
 
 /**
  * TimelineView dengan sistem Exposure:
