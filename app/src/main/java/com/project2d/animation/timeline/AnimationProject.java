@@ -10,43 +10,53 @@ import android.graphics.PorterDuff;
 import java.util.ArrayList;
 import java.util.List;
 
+/**
+ * Model data animasi.
+ *
+ * Exposure:
+ *  Setiap Frame punya "exposure" (jumlah playback-tick yang ditampilkan).
+ *  exposure=1 → 1 tick (normal), exposure=2 → 2 tick (held 2 frame), dst.
+ *
+ *  Timeline "tick" = slot yang terlihat di timeline.
+ *  Satu Frame dengan exposure=2 menempati 2 slot visual.
+ *
+ *  getFrameCount() → jumlah Frame unik (gambar)
+ *  getTotalTicks() → total slot visual di timeline
+ *  getFrameAtTick(tick) → Frame yang tampil di tick tertentu
+ *  getTickStart(frameIdx) → tick awal frame tersebut
+ */
 public class AnimationProject {
 
     // ── Frame ─────────────────────────────────────────────────────────────────
     public static class Frame {
-        public Bitmap bitmap;
-        public boolean isEmpty = true;
+        public Bitmap  bitmap;
+        public boolean isEmpty   = true;
+        public int     exposure  = 1;   // berapa tick frame ini ditampilkan
 
         public Frame(int w, int h) {
             bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
         }
 
-        /** Thumbnail dengan background putih + isi bitmap jika tidak kosong */
         public Bitmap getThumbnail(int tw, int th) {
-            if (tw <= 0 || th <= 0) return null;
-            Bitmap thumb = Bitmap.createBitmap(tw, th, Bitmap.Config.ARGB_8888);
-            Canvas c = new Canvas(thumb);
+            if (tw<=0||th<=0) return null;
+            Bitmap out = Bitmap.createBitmap(tw, th, Bitmap.Config.ARGB_8888);
+            Canvas c   = new Canvas(out);
             c.drawColor(Color.WHITE);
-            if (!isEmpty && bitmap != null && !bitmap.isRecycled()) {
+            if (!isEmpty && bitmap!=null && !bitmap.isRecycled()) {
                 Matrix m = new Matrix();
-                float sx = (float) tw / bitmap.getWidth();
-                float sy = (float) th / bitmap.getHeight();
-                float s  = Math.min(sx, sy);
-                float dx = (tw - bitmap.getWidth() * s) / 2f;
-                float dy = (th - bitmap.getHeight() * s) / 2f;
-                m.postScale(s, s);
-                m.postTranslate(dx, dy);
-                Paint p = new Paint(Paint.FILTER_BITMAP_FLAG | Paint.ANTI_ALIAS_FLAG);
-                c.drawBitmap(bitmap, m, p);
+                float sx=tw/(float)bitmap.getWidth(), sy=th/(float)bitmap.getHeight();
+                float s=Math.min(sx,sy);
+                m.postScale(s,s);
+                m.postTranslate((tw-bitmap.getWidth()*s)/2f,(th-bitmap.getHeight()*s)/2f);
+                c.drawBitmap(bitmap,m,new Paint(Paint.FILTER_BITMAP_FLAG|Paint.ANTI_ALIAS_FLAG));
             }
-            return thumb;
+            return out;
         }
 
         public void clear() {
-            if (bitmap != null && !bitmap.isRecycled()) {
-                new Canvas(bitmap).drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR);
-            }
-            isEmpty = true;
+            if (bitmap!=null&&!bitmap.isRecycled())
+                new Canvas(bitmap).drawColor(Color.TRANSPARENT,PorterDuff.Mode.CLEAR);
+            isEmpty=true;
         }
     }
 
@@ -59,51 +69,57 @@ public class AnimationProject {
 
         public Layer(String name, int frameCount, int docW, int docH) {
             this.name = name;
-            for (int i = 0; i < frameCount; i++) frames.add(new Frame(docW, docH));
+            for (int i=0; i<frameCount; i++) frames.add(new Frame(docW,docH));
         }
 
         public Frame getFrame(int idx) {
-            if (idx < 0 || idx >= frames.size()) return null;
+            if (idx<0||idx>=frames.size()) return null;
             return frames.get(idx);
         }
 
-        public void addFrame(int docW, int docH) {
-            frames.add(new Frame(docW, docH));
+        /** Frame yang tampil pada tick tertentu */
+        public Frame getFrameAtTick(int tick) {
+            int t=0;
+            for (Frame f : frames) {
+                if (tick>=t && tick<t+f.exposure) return f;
+                t+=f.exposure;
+            }
+            return frames.isEmpty() ? null : frames.get(frames.size()-1);
         }
 
-        public void insertFrame(int idx, int docW, int docH) {
-            idx = Math.max(0, Math.min(idx, frames.size()));
-            frames.add(idx, new Frame(docW, docH));
+        /** Total tick (slot visual) semua frame di layer ini */
+        public int getTotalTicks() {
+            int t=0; for (Frame f:frames) t+=f.exposure; return t;
         }
 
-        public void removeFrame(int idx) {
-            if (frames.size() > 1 && idx >= 0 && idx < frames.size())
-                frames.remove(idx);
+        /** Tick pertama dari frame[idx] */
+        public int getTickStart(int frameIdx) {
+            int t=0;
+            for (int i=0;i<Math.min(frameIdx,frames.size());i++) t+=frames.get(i).exposure;
+            return t;
         }
 
-        public int getFrameCount() { return frames.size(); }
+        public void addFrame(int docW,int docH)            { frames.add(new Frame(docW,docH)); }
+        public void insertFrame(int idx,int docW,int docH) { idx=Math.max(0,Math.min(idx,frames.size())); frames.add(idx,new Frame(docW,docH)); }
+        public void removeFrame(int idx)                   { if(frames.size()>1&&idx>=0&&idx<frames.size()) frames.remove(idx); }
+        public int  getFrameCount()                        { return frames.size(); }
 
-        /** Thumbnail layer = thumbnail frame aktif */
-        public Bitmap getLayerThumbnail(int frameIdx, int tw, int th) {
-            Frame f = getFrame(frameIdx);
-            if (f == null) return null;
-            return f.getThumbnail(tw, th);
+        public Bitmap getLayerThumbnail(int frameIdx,int tw,int th){
+            Frame f=getFrame(frameIdx); return f==null?null:f.getThumbnail(tw,th);
         }
     }
 
     // ── Project ───────────────────────────────────────────────────────────────
-    private int docW, docH;
-    private int fps         = 24;
-    private int frameCount  = 8;
-    private int currentFrame = 0;
-    private int currentLayer = 0;
+    private int docW,docH;
+    private int fps=24;
+    private int frameCount=8;           // jumlah Frame unik
+    private int currentFrame=0;         // index Frame unik
+    private int currentLayer=0;
+    private final List<Layer> layers=new ArrayList<>();
 
-    private final List<Layer> layers = new ArrayList<>();
-
-    public AnimationProject(int docW, int docH) {
-        this.docW = docW;
-        this.docH = docH;
-        layers.add(new Layer("Layer 1", frameCount, docW, docH));
+    public AnimationProject(int docW,int docH){
+        this.docW=docW; this.docH=docH;
+        layers.add(new Layer("Layer 1",frameCount,docW,docH));
     }
 
     public int getDocW()            { return docW; }
@@ -113,107 +129,120 @@ public class AnimationProject {
     public int getCurrentFrameIdx() { return currentFrame; }
     public int getCurrentLayerIdx() { return currentLayer; }
     public int getLayerCount()      { return layers.size(); }
+    public void setFps(int f)       { fps=Math.max(1,Math.min(60,f)); }
 
-    public void setFps(int f)  { fps = Math.max(1, Math.min(60, f)); }
-
-    public Layer getLayer(int idx) {
-        if (idx < 0 || idx >= layers.size()) return null;
-        return layers.get(idx);
-    }
-    public Layer getCurrentLayer() { return getLayer(currentLayer); }
-
-    public Frame getCurrentFrame() {
-        Layer l = getCurrentLayer();
-        return l == null ? null : l.getFrame(currentFrame);
+    /** Total tick dari layer terpanjang (untuk lebar timeline) */
+    public int getTotalTicks() {
+        int max=0;
+        for (Layer l:layers) max=Math.max(max,l.getTotalTicks());
+        return Math.max(max,frameCount);
     }
 
-    public Frame getFrameAt(int layerIdx, int frameIdx) {
-        Layer l = getLayer(layerIdx);
-        return l == null ? null : l.getFrame(frameIdx);
+    public Layer getLayer(int idx)    { return(idx<0||idx>=layers.size())?null:layers.get(idx); }
+    public Layer getCurrentLayer()    { return getLayer(currentLayer); }
+    public Frame getCurrentFrame()    { Layer l=getCurrentLayer(); return l==null?null:l.getFrame(currentFrame); }
+    public Frame getFrameAt(int li,int fi){ Layer l=getLayer(li); return l==null?null:l.getFrame(fi); }
+
+    public void setCurrentFrame(int idx){ currentFrame=Math.max(0,Math.min(frameCount-1,idx)); }
+    public void setCurrentLayer(int idx){ currentLayer=Math.max(0,Math.min(layers.size()-1,idx)); }
+    public void nextFrame()             { setCurrentFrame(currentFrame+1); }
+    public void prevFrame()             { setCurrentFrame(currentFrame-1); }
+
+    // ── Exposure ──────────────────────────────────────────────────────────────
+
+    /** Naikkan exposure frame aktif di layer aktif sebesar +1 */
+    public void increaseCurrentExposure(){
+        Layer l=getCurrentLayer(); if(l==null) return;
+        Frame f=l.getFrame(currentFrame); if(f==null) return;
+        f.exposure=Math.min(f.exposure+1, 99);
     }
 
-    public void setCurrentFrame(int idx) {
-        currentFrame = Math.max(0, Math.min(frameCount - 1, idx));
-    }
-    public void setCurrentLayer(int idx) {
-        currentLayer = Math.max(0, Math.min(layers.size() - 1, idx));
+    /** Turunkan exposure frame aktif (min 1) */
+    public void decreaseCurrentExposure(){
+        Layer l=getCurrentLayer(); if(l==null) return;
+        Frame f=l.getFrame(currentFrame); if(f==null) return;
+        f.exposure=Math.max(1,f.exposure-1);
     }
 
-    public void nextFrame() { setCurrentFrame(currentFrame + 1); }
-    public void prevFrame() { setCurrentFrame(currentFrame - 1); }
+    public int getCurrentExposure(){
+        Layer l=getCurrentLayer(); if(l==null) return 1;
+        Frame f=l.getFrame(currentFrame); return f==null?1:f.exposure;
+    }
 
-    public void addFrame() {
+    // ── Frame edit ────────────────────────────────────────────────────────────
+    public void addFrame(){
         frameCount++;
-        for (Layer l : layers) l.addFrame(docW, docH);
+        for(Layer l:layers) l.addFrame(docW,docH);
     }
 
-    public void insertFrameAfterCurrent() {
-        int at = currentFrame + 1;
-        frameCount++;
-        for (Layer l : layers) l.insertFrame(at, docW, docH);
+    public void insertFrameAfterCurrent(){
+        int at=currentFrame+1; frameCount++;
+        for(Layer l:layers) l.insertFrame(at,docW,docH);
         setCurrentFrame(at);
     }
 
-    public void removeCurrentFrame() {
-        if (frameCount <= 1) return;
-        for (Layer l : layers) l.removeFrame(currentFrame);
+    public void removeCurrentFrame(){
+        if(frameCount<=1) return;
+        for(Layer l:layers) l.removeFrame(currentFrame);
         frameCount--;
-        if (currentFrame >= frameCount) currentFrame = frameCount - 1;
+        if(currentFrame>=frameCount) currentFrame=frameCount-1;
     }
 
-    public void addLayer() {
-        addLayer(false);
+    // ── Layer edit ────────────────────────────────────────────────────────────
+    public void addLayer(){ addLayer(false); }
+    public void addLayer(boolean isBackground){
+        String name=isBackground?"BG "+(layers.size()+1):"Layer "+(layers.size()+1);
+        Layer l=new Layer(name,frameCount,docW,docH);
+        if(isBackground){ layers.add(0,l); if(currentLayer>=0) currentLayer++; }
+        else             layers.add(l);
     }
 
-    public void addLayer(boolean isBackground) {
-        String name = isBackground
-            ? "BG " + (layers.size() + 1)
-            : "Layer " + (layers.size() + 1);
-        Layer l = new Layer(name, frameCount, docW, docH);
-        if (isBackground) {
-            // Background layer ditambah di paling bawah (index 0)
-            layers.add(0, l);
-            if (currentLayer >= 0) currentLayer++; // shift index agar tetap pointing layer yang sama
-        } else {
-            layers.add(l);
-        }
-    }
-
-    public void removeLayer(int idx) {
-        if (layers.size() > 1 && idx >= 0 && idx < layers.size()) {
+    public void removeLayer(int idx){
+        if(layers.size()>1&&idx>=0&&idx<layers.size()){
             layers.remove(idx);
-            if (currentLayer >= layers.size()) currentLayer = layers.size() - 1;
+            if(currentLayer>=layers.size()) currentLayer=layers.size()-1;
         }
     }
 
-    /** Composite semua layer ke satu bitmap */
-    public Bitmap compositeFrame(int frameIdx) {
-        Bitmap out = Bitmap.createBitmap(docW, docH, Bitmap.Config.ARGB_8888);
-        Canvas c   = new Canvas(out);
-        c.drawColor(Color.WHITE);
-        Paint p = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
-        for (Layer l : layers) {
-            if (!l.visible) continue;
-            Frame f = l.getFrame(frameIdx);
-            if (f == null || f.isEmpty || f.bitmap == null || f.bitmap.isRecycled()) continue;
-            p.setAlpha((int)(l.opacity * 255));
-            c.drawBitmap(f.bitmap, 0, 0, p);
+    /** Composite semua layer untuk playback */
+    public Bitmap compositeFrame(int frameIdx){
+        Bitmap out=Bitmap.createBitmap(docW,docH,Bitmap.Config.ARGB_8888);
+        Canvas c=new Canvas(out); c.drawColor(Color.WHITE);
+        Paint p=new Paint(Paint.ANTI_ALIAS_FLAG|Paint.FILTER_BITMAP_FLAG);
+        for(Layer l:layers){
+            if(!l.visible) continue;
+            Frame f=l.getFrame(frameIdx);
+            if(f==null||f.isEmpty||f.bitmap==null||f.bitmap.isRecycled()) continue;
+            p.setAlpha((int)(l.opacity*255));
+            c.drawBitmap(f.bitmap,0,0,p);
         }
         return out;
     }
 
-    public void resize(int newW, int newH) {
-        docW = newW; docH = newH;
-        for (Layer l : layers)
-            for (Frame f : l.frames) {
-                Bitmap nb = Bitmap.createBitmap(newW, newH, Bitmap.Config.ARGB_8888);
-                if (!f.isEmpty && f.bitmap != null && !f.bitmap.isRecycled())
-                    new Canvas(nb).drawBitmap(f.bitmap, 0, 0, null);
-                if (f.bitmap != null && !f.bitmap.isRecycled()) f.bitmap.recycle();
-                f.bitmap = nb;
+    /** Composite menggunakan tick (untuk playback dengan exposure) */
+    public Bitmap compositeFrameAtTick(int tick){
+        Bitmap out=Bitmap.createBitmap(docW,docH,Bitmap.Config.ARGB_8888);
+        Canvas c=new Canvas(out); c.drawColor(Color.WHITE);
+        Paint p=new Paint(Paint.ANTI_ALIAS_FLAG|Paint.FILTER_BITMAP_FLAG);
+        for(Layer l:layers){
+            if(!l.visible) continue;
+            Frame f=l.getFrameAtTick(tick);
+            if(f==null||f.isEmpty||f.bitmap==null||f.bitmap.isRecycled()) continue;
+            p.setAlpha((int)(l.opacity*255));
+            c.drawBitmap(f.bitmap,0,0,p);
+        }
+        return out;
+    }
+
+    public void resize(int nW,int nH){
+        docW=nW; docH=nH;
+        for(Layer l:layers)
+            for(Frame f:l.frames){
+                Bitmap nb=Bitmap.createBitmap(nW,nH,Bitmap.Config.ARGB_8888);
+                if(!f.isEmpty&&f.bitmap!=null&&!f.bitmap.isRecycled())
+                    new Canvas(nb).drawBitmap(f.bitmap,0,0,null);
+                if(f.bitmap!=null&&!f.bitmap.isRecycled()) f.bitmap.recycle();
+                f.bitmap=nb;
             }
     }
 }
-
-// PATCH: tambah di bawah method addLayer() yang sudah ada
-// Ini tidak bisa langsung append, jadi kita overwrite addLayer()

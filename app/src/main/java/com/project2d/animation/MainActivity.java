@@ -209,18 +209,39 @@ public class MainActivity extends AppCompatActivity {
 
     private void setupTimeline(){
         timelineView.setOnTimelineEvent(new TimelineView.OnTimelineEvent(){
-            @Override public void onFrameChanged(int fi){project.setCurrentFrame(fi);syncEngineToFrame();canvasView.invalidate();timelineView.invalidate();}
-            @Override public void onLayerChanged(int li){project.setCurrentLayer(li);syncEngineToFrame();canvasView.invalidate();timelineView.invalidate();}
-            @Override public void onFrameAdded(){timelineView.invalidate();}
-            @Override public void onFrameRemoved(){syncEngineToFrame();canvasView.invalidate();timelineView.invalidate();}
+            @Override public void onFrameChanged(int fi){
+                project.setCurrentFrame(fi); syncEngineToFrame();
+                canvasView.invalidate(); timelineView.invalidate();
+            }
+            @Override public void onLayerChanged(int li){
+                project.setCurrentLayer(li); syncEngineToFrame();
+                canvasView.invalidate(); timelineView.invalidate();
+            }
+            @Override public void onFrameAdded(){
+                syncEngineToFrame(); canvasView.invalidate(); timelineView.invalidate();
+            }
+            @Override public void onFrameRemoved(){
+                syncEngineToFrame(); canvasView.invalidate(); timelineView.invalidate();
+            }
             @Override public void onLayerAdded(boolean isBg){
                 project.addLayer(isBg); syncEngineToFrame();
                 canvasView.invalidate(); timelineView.invalidate();
             }
-            @Override public void onLayerRemoved(int li){syncEngineToFrame();canvasView.invalidate();timelineView.invalidate();}
-            @Override public void onPlayStateChanged(boolean playing){canvasView.setPlaybackMode(playing);}
+            @Override public void onLayerRemoved(int li){
+                syncEngineToFrame(); canvasView.invalidate(); timelineView.invalidate();
+            }
+            @Override public void onPlayStateChanged(boolean playing){
+                canvasView.setPlaybackMode(playing);
+            }
             @Override public void onOnionSkinLayerToggled(int li){
-                if(onionSettings!=null){onionSettings.toggleLayerEnabled(li);canvasView.invalidate();timelineView.invalidate();}
+                if(onionSettings!=null){
+                    onionSettings.toggleLayerEnabled(li);
+                    canvasView.invalidate(); timelineView.invalidate();
+                }
+            }
+            @Override public void onExposureChanged(int frameIdx, int newExposure){
+                // Exposure berubah — update timeline visual saja, tidak perlu sync engine
+                timelineView.invalidate();
             }
         });
     }
