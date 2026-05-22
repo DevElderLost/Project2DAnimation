@@ -3,6 +3,8 @@ package com.project2d.animation;
 import android.animation.ValueAnimator;
 import android.app.AlertDialog;
 import android.graphics.Typeface;
+import android.graphics.Bitmap;
+import android.graphics.Canvas;
 import android.os.Build;
 import android.os.Bundle;
 import android.text.InputType;
@@ -267,7 +269,35 @@ public class MainActivity extends AppCompatActivity {
                 canvasView.invalidate();
                 timelineView.invalidate();
             }
+            @Override public void onFrameReordered(int fromIdx, int toIdx){
+                project.setCurrentFrame(toIdx); syncEngineToFrame(); canvasView.invalidate(); timelineView.invalidate();
+            }
+            @Override public void onFrameSettingsRequested(){
+                if(frameSettingsWindow!=null){ frameSettingsWindow.setProject(project); frameSettingsWindow.showWindow(); }
+            }
         });
+    }
+
+    private void addLoopFrames(int count){
+        if(project==null||count<=0) return;
+        AnimationProject.Layer l=project.getCurrentLayer(); if(l==null) return;
+        // Salin snapshot semua frame saat ini, lalu append sebanyak count kali
+        java.util.List<AnimationProject.Frame> snapshot=new java.util.ArrayList<>(l.frames);
+        for(int c=0;c<count;c++){
+            for(AnimationProject.Frame f:snapshot){
+                AnimationProject.Frame nf=new AnimationProject.Frame(project.getDocW(),project.getDocH());
+                if(!f.isEmpty && f.bitmap!=null && !f.bitmap.isRecycled()){
+                    new Canvas(nf.bitmap).drawBitmap(f.bitmap,0,0,null);
+                    nf.isEmpty=false;
+                } else {
+                    nf.isEmpty=true;
+                }
+                nf.exposure=f.exposure;
+                l.frames.add(nf);
+            }
+        }
+        project.recalcFrameCountPublic();
+        syncEngineToFrame(); canvasView.invalidate(); timelineView.invalidate();
     }
 
     private void setupMenuBar(){
