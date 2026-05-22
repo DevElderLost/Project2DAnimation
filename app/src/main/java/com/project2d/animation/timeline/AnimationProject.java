@@ -140,7 +140,39 @@ public class AnimationProject {
         public int  getFrameCount()                        { return frames.size(); }
 
         public Bitmap getLayerThumbnail(int frameIdx,int tw,int th){
-            Frame f=getFrame(frameIdx); return f==null?null:f.getThumbnail(tw,th);
+            Frame f=getFrameForDisplay(frameIdx); return f==null?null:f.getThumbnail(tw,th);
+        }
+
+        /**
+         * Dapatkan frame yang harus ditampilkan pada frameIdx tertentu,
+         * dengan mempertimbangkan exposure (hold frames).
+         *
+         * Contoh: Layer punya 2 frame, frame[0].exposure=3, frame[1].exposure=2
+         *   tick 0,1,2 → frame[0]
+         *   tick 3,4   → frame[1]
+         *   tick 5+    → frame[1] (frame terakhir tetap ditampilkan = hold to end)
+         *
+         * @param globalFrameIdx index frame global dari project (bukan tick)
+         */
+        public Frame getFrameForDisplay(int globalFrameIdx) {
+            if (frames.isEmpty()) return null;
+
+            // Konversi globalFrameIdx ke "tick" — anggap 1 frame global = 1 tick
+            int tick = globalFrameIdx;
+
+            int t = 0;
+            Frame lastFrame = frames.get(0);
+            for (Frame f : frames) {
+                lastFrame = f; // selalu update lastFrame
+                if (tick >= t && tick < t + f.exposure) {
+                    return f; // tick ini ada di exposure range frame ini
+                }
+                t += f.exposure;
+            }
+
+            // tick melebihi semua exposure — kembalikan frame TERAKHIR
+            // Ini yang membuat layer pendek "hold" sampai akhir timeline
+            return lastFrame;
         }
     }
 
@@ -277,13 +309,14 @@ public class AnimationProject {
         }
     }
 
-    /** Composite semua layer untuk playback dengan blend mode */
+    /** Composite semua layer untuk playback dengan blend mode dan exposure hold */
     public Bitmap compositeFrame(int frameIdx){
         Bitmap out=Bitmap.createBitmap(docW,docH,Bitmap.Config.ARGB_8888);
         Canvas c=new Canvas(out); c.drawColor(Color.WHITE);
         for(Layer l:layers){
             if(!l.visible) continue;
-            Frame f=l.getFrame(frameIdx);
+            // getFrameForDisplay mengembalikan frame yang benar dengan exposure hold
+            Frame f=l.getFrameForDisplay(frameIdx);
             if(f==null||f.isEmpty||f.bitmap==null||f.bitmap.isRecycled()) continue;
             Paint p=new Paint(Paint.ANTI_ALIAS_FLAG|Paint.FILTER_BITMAP_FLAG);
             p.setAlpha((int)(l.opacity*255));
@@ -295,13 +328,18 @@ public class AnimationProject {
         return out;
     }
 
-    /** Composite menggunakan tick (untuk playback dengan exposure) */
+    /**
+     * Composite menggunakan tick (playback exposure-aware).
+     * Layer yang lebih pendek "hold" frame terakhirnya.
+     */
     public Bitmap compositeFrameAtTick(int tick){
         Bitmap out=Bitmap.createBitmap(docW,docH,Bitmap.Config.ARGB_8888);
         Canvas c=new Canvas(out); c.drawColor(Color.WHITE);
         for(Layer l:layers){
             if(!l.visible) continue;
-            Frame f=l.getFrameAtTick(tick);
+            // getFrameAtTick sudah handle exposure, tapi tidak handle "hold to end"
+            // jadi kita pakai getFrameForDisplay dengan tick sebagai index
+            Frame f=l.getFrameForDisplay(tick);
             if(f==null||f.isEmpty||f.bitmap==null||f.bitmap.isRecycled()) continue;
             Paint p=new Paint(Paint.ANTI_ALIAS_FLAG|Paint.FILTER_BITMAP_FLAG);
             p.setAlpha((int)(l.opacity*255));

@@ -222,7 +222,8 @@ public class AnimationCanvasView extends View {
 
     /**
      * Gambar semua layer KECUALI layer aktif, dari bawah ke atas.
-     * Ini membuat gambar layer lain selalu terlihat saat edit.
+     * Menggunakan getFrameForDisplay() agar layer dengan exposure hold
+     * tetap menampilkan frame terakhirnya meski frameIdx melewati jumlah frame.
      */
     private void drawAllLayersExceptActive(Canvas canvas){
         if(project==null) return;
@@ -231,13 +232,13 @@ public class AnimationCanvasView extends View {
         int layerCount=project.getLayerCount();
 
         Paint p=new Paint(pDraw);
+        // Gambar dari layer paling bawah (index tinggi) ke atas
         for(int li=layerCount-1;li>=0;li--){
-            if(li==activeLayerIdx) continue; // skip layer aktif, digambar terakhir
+            if(li==activeLayerIdx) continue; // skip layer aktif
             AnimationProject.Layer l=project.getLayer(li);
             if(l==null||!l.visible) continue;
-            // Ambil frame — clamp jika layer lebih pendek
-            int fi=Math.min(curFrame,l.getFrameCount()-1);
-            AnimationProject.Frame f=l.getFrame(fi);
+            // getFrameForDisplay: handle exposure hold — layer pendek tetap tampil
+            AnimationProject.Frame f=l.getFrameForDisplay(curFrame);
             if(f==null||f.isEmpty||f.bitmap==null||f.bitmap.isRecycled()) continue;
             p.setAlpha((int)(l.opacity*255));
             if(l.blendMode!=AnimationProject.BlendMode.NORMAL)
@@ -274,8 +275,8 @@ public class AnimationCanvasView extends View {
             if(!onionSettings.isLayerEnabled(li)) continue;
             AnimationProject.Layer layer=project.getLayer(li);
             if(layer==null||!layer.visible) continue;
-            int fi=Math.min(frameIdx,layer.getFrameCount()-1);
-            AnimationProject.Frame f=layer.getFrame(fi);
+            // getFrameForDisplay: handle exposure hold di onion skin juga
+            AnimationProject.Frame f=layer.getFrameForDisplay(frameIdx);
             if(f==null||f.isEmpty||f.bitmap==null||f.bitmap.isRecycled()) continue;
             Paint lp=new Paint(Paint.ANTI_ALIAS_FLAG); lp.setAlpha((int)(layer.opacity*255));
             cc.drawBitmap(f.bitmap,0,0,lp);
