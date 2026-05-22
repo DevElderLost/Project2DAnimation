@@ -175,10 +175,21 @@ public class AnimationProject {
 
     public Layer getLayer(int idx)    { return(idx<0||idx>=layers.size())?null:layers.get(idx); }
     public Layer getCurrentLayer()    { return getLayer(currentLayer); }
-    public Frame getCurrentFrame()    { Layer l=getCurrentLayer(); return l==null?null:l.getFrame(currentFrame); }
+    public Frame getCurrentFrame(){
+        Layer l=getCurrentLayer();
+        if(l==null) return null;
+        // Jika layer lebih pendek dari currentFrame, kembalikan frame terakhir
+        int idx=Math.min(currentFrame, l.getFrameCount()-1);
+        return l.getFrame(idx);
+    }
     public Frame getFrameAt(int li,int fi){ Layer l=getLayer(li); return l==null?null:l.getFrame(fi); }
 
-    public void setCurrentFrame(int idx){ currentFrame=Math.max(0,Math.min(frameCount-1,idx)); }
+    public void setCurrentFrame(int idx){
+        // Clamp ke ukuran layer aktif agar tidak out of bounds
+        Layer l=getCurrentLayer();
+        int maxFrame=l!=null?l.getFrameCount()-1:frameCount-1;
+        currentFrame=Math.max(0,Math.min(maxFrame,idx));
+    }
     public void setCurrentLayer(int idx){ currentLayer=Math.max(0,Math.min(layers.size()-1,idx)); }
     public void nextFrame()             { setCurrentFrame(currentFrame+1); }
     public void prevFrame()             { setCurrentFrame(currentFrame-1); }
@@ -205,22 +216,46 @@ public class AnimationProject {
     }
 
     // ── Frame edit ────────────────────────────────────────────────────────────
+    /**
+     * Tambah frame HANYA ke layer aktif.
+     * Layer lain tidak berubah — frameCount global diupdate ke max semua layer.
+     */
     public void addFrame(){
-        frameCount++;
-        for(Layer l:layers) l.addFrame(docW,docH);
+        Layer l=getCurrentLayer(); if(l==null) return;
+        l.addFrame(docW,docH);
+        recalcFrameCount();
     }
 
+    /**
+     * Insert frame setelah frame aktif HANYA di layer aktif.
+     */
     public void insertFrameAfterCurrent(){
-        int at=currentFrame+1; frameCount++;
-        for(Layer l:layers) l.insertFrame(at,docW,docH);
+        Layer l=getCurrentLayer(); if(l==null) return;
+        int at=currentFrame+1;
+        l.insertFrame(at,docW,docH);
+        recalcFrameCount();
         setCurrentFrame(at);
     }
 
+    /**
+     * Hapus frame aktif HANYA dari layer aktif.
+     */
     public void removeCurrentFrame(){
-        if(frameCount<=1) return;
-        for(Layer l:layers) l.removeFrame(currentFrame);
-        frameCount--;
-        if(currentFrame>=frameCount) currentFrame=frameCount-1;
+        Layer l=getCurrentLayer(); if(l==null) return;
+        if(l.getFrameCount()<=1) return;
+        l.removeFrame(currentFrame);
+        recalcFrameCount();
+        if(currentFrame>=l.getFrameCount()) currentFrame=l.getFrameCount()-1;
+    }
+
+    /**
+     * Hitung ulang frameCount = jumlah frame terbanyak di antara semua layer.
+     * Ini menentukan lebar timeline.
+     */
+    private void recalcFrameCount(){
+        int max=0;
+        for(Layer l:layers) max=Math.max(max,l.getFrameCount());
+        frameCount=Math.max(1,max);
     }
 
     // ── Layer edit ────────────────────────────────────────────────────────────
