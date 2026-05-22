@@ -32,6 +32,7 @@ import com.project2d.animation.windows.BrushColorWindow;
 import com.project2d.animation.windows.CanvasSizeWindow;
 import com.project2d.animation.windows.FloatingWindow;
 import com.project2d.animation.windows.OnionSkinWindow;
+import com.project2d.animation.windows.FrameSettingsWindow;
 import com.project2d.animation.windows.ToolPanelWindow;
 
 import java.util.List;
@@ -49,7 +50,8 @@ public class MainActivity extends AppCompatActivity {
     private FloatingWindow      floatingWindow;
     private ImGuiDropdown       dropdown;
 
-    private DrawingEngine     drawingEngine;
+    private FrameSettingsWindow frameSettingsWindow;
+    private DrawingEngine       drawingEngine;
     private AnimationProject  project;
     private OnionSkinSettings onionSettings;
 
@@ -135,6 +137,24 @@ public class MainActivity extends AppCompatActivity {
         root.addView(onionSkinWindow,new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,ViewGroup.LayoutParams.MATCH_PARENT));
         onionSkinWindow.setPosition(8*density,menuBarH+toolbarH+120*density);
         onionSkinWindow.setOnSettingsChanged(()->{canvasView.invalidate();timelineView.invalidate();});
+
+        // Frame Settings Window
+        frameSettingsWindow=new FrameSettingsWindow(this);
+        frameSettingsWindow.setProject(project);
+        root.addView(frameSettingsWindow,new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,ViewGroup.LayoutParams.MATCH_PARENT));
+        frameSettingsWindow.setPosition(60*density,menuBarH+toolbarH+60*density);
+        frameSettingsWindow.setOnFrameSettingsApplied(new FrameSettingsWindow.OnFrameSettingsApplied(){
+            @Override public void onAddEmptyFrame(){
+                // Tambah N frame kosong ke layer aktif
+                int count=1; // addCount sudah di-handle di window
+                project.insertFrameAfterCurrent();
+                syncEngineToFrame(); canvasView.invalidate(); timelineView.invalidate();
+            }
+            @Override public void onAddLoopFrames(int count){
+                // Loop mode: salin frame 1..frameCount sebanyak count kali
+                addLoopFrames(count);
+            }
+        });
 
         // Canvas Size Window
         canvasSizeWindow=new CanvasSizeWindow(this);

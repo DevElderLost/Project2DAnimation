@@ -248,6 +248,9 @@ public class AnimationProject {
         if(currentFrame>=l.getFrameCount()) currentFrame=l.getFrameCount()-1;
     }
 
+    /** Public wrapper untuk recalcFrameCount — dipakai dari luar */
+    public void recalcFrameCountPublic(){ recalcFrameCount(); }
+
     /**
      * Hitung ulang frameCount = jumlah frame terbanyak di antara semua layer.
      * Ini menentukan lebar timeline.
