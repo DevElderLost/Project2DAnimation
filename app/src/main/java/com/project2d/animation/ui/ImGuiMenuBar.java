@@ -25,7 +25,7 @@ public class ImGuiMenuBar extends View {
         paintText.setColor(ImGuiTheme.COLOR_MENU_ITEM_TEXT);paintText.setTextSize(13*d);paintText.setTypeface(Typeface.MONOSPACE);
         paintHover.setColor(ImGuiTheme.COLOR_MENU_ITEM_HOVERED);paintHover.setStyle(Paint.Style.FILL);
         paintBorder.setColor(ImGuiTheme.COLOR_BORDER);paintBorder.setStyle(Paint.Style.STROKE);paintBorder.setStrokeWidth(1f);
-        List<String> fi=new ArrayList<>(Arrays.asList("New","Open","Save","Save As...","---","Exit"));
+        List<String> fi=new ArrayList<>(Arrays.asList("New","Import","Open","Save","Save As...","---","Exit"));
         List<String> ei=new ArrayList<>(Arrays.asList("Undo","Redo","---","Cut","Copy","Paste","---","Select All"));
         List<String> si=new ArrayList<>(Arrays.asList("Canvas Size","Grid Settings","---","Preferences"));
         menus.add(new MenuItem("File",fi));menus.add(new MenuItem("Edit",ei));menus.add(new MenuItem("Settings",si));

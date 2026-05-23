@@ -2,9 +2,16 @@ package com.project2d.animation;
 
 import android.animation.ValueAnimator;
 import android.app.AlertDialog;
-import android.graphics.Typeface;
+import android.content.Intent;
 import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
+import android.graphics.Color;
+import android.graphics.Matrix;
+import android.graphics.PorterDuff;
+import android.graphics.Typeface;
+import android.media.MediaMetadataRetriever;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.text.InputType;
@@ -19,11 +26,14 @@ import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.Toast;
 
+import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AppCompatActivity;
 
 import com.project2d.animation.canvas.AnimationCanvasView;
 import com.project2d.animation.drawing.DrawingEngine;
 import com.project2d.animation.drawing.OnionSkinSettings;
+import com.project2d.animation.export.ExportEngine;
 import com.project2d.animation.timeline.AnimationProject;
 import com.project2d.animation.timeline.TimelineView;
 import com.project2d.animation.ui.ImGuiDropdown;
@@ -32,12 +42,20 @@ import com.project2d.animation.ui.ImGuiTheme;
 import com.project2d.animation.ui.ToolbarView;
 import com.project2d.animation.windows.BrushColorWindow;
 import com.project2d.animation.windows.CanvasSizeWindow;
+import com.project2d.animation.windows.ExportWindow;
 import com.project2d.animation.windows.FloatingWindow;
 import com.project2d.animation.windows.OnionSkinWindow;
 import com.project2d.animation.windows.FrameSettingsWindow;
+import com.project2d.animation.windows.ProgressWindow;
 import com.project2d.animation.windows.ToolPanelWindow;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
 
 public class MainActivity extends AppCompatActivity {
 
@@ -57,11 +75,25 @@ public class MainActivity extends AppCompatActivity {
     private AnimationProject  project;
     private OnionSkinSettings onionSettings;
 
+    private ActivityResultLauncher<String[]> importLauncher;
+    private ActivityResultLauncher<String> exportLauncher;
+    private ExportWindow exportWindow;
+    private ProgressWindow progressWindow;
+    private ExportEngine exportEngine;
+    private ExportWindow.ExportTarget pendingExportTarget;
+    private ExportEngine.VideoCodec pendingVideoCodec = ExportEngine.VideoCodec.H264;
+
     private FrameLayout root;
     private float density;
     private int menuBarH,toolbarH,timelineH;
     private boolean timelineVisible=false;
     private ValueAnimator timelineAnim;
+
+    private static class NamedBitmap {
+        final String name;
+        final Bitmap bitmap;
+        NamedBitmap(String name, Bitmap bitmap){ this.name=name; this.bitmap=bitmap; }
+    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState){
@@ -189,8 +221,40 @@ public class MainActivity extends AppCompatActivity {
         dropdown.setVisibility(View.GONE);
         root.addView(dropdown,new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,ViewGroup.LayoutParams.MATCH_PARENT));
 
+        exportEngine = new ExportEngine(this);
+        progressWindow = new ProgressWindow(this);
+        root.addView(progressWindow, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+
+        exportWindow = new ExportWindow(this);
+        exportWindow.setPosition(40 * density, 80 * density);
+        exportWindow.setH265Supported(exportEngine.supportsH265());
+        root.addView(exportWindow, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+
+        registerImportLauncher();
+        registerExportLauncher();
         setContentView(root);
         setupMenuBar(); setupDropdown();
+    }
+
+    private void registerImportLauncher() {
+        importLauncher = registerForActivityResult(new ActivityResultContracts.OpenDocument(), uri -> {
+            if (uri == null) return;
+            try {
+                getContentResolver().takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            } catch (SecurityException ignored) {
+            }
+            showProgressWindow("Importing", "Preparing import...");
+            new Thread(() -> handleImportedUri(uri)).start();
+        });
+    }
+
+    private void registerExportLauncher() {
+        exportLauncher = registerForActivityResult(new ActivityResultContracts.CreateDocument("*/*"), uri -> {
+            if (uri == null) return;
+            startExport(uri);
+        });
+
+        exportWindow.setOnExportRequestedListener((target, codec) -> launchExport(target, codec));
     }
 
     private void syncEngineToFrame(){
@@ -316,6 +380,8 @@ public class MainActivity extends AppCompatActivity {
         switch(menu){
             case "File":
                 if(item.equals("New")){new AlertDialog.Builder(this).setTitle("New").setMessage("Buat project baru?").setPositiveButton("Ya",(d,w)->{drawingEngine.clearCanvas();canvasView.invalidate();}).setNegativeButton("Tidak",null).show();}
+                else if(item.equals("Import")){launchImportPicker();}
+                else if(item.equals("Export...")){if(exportWindow.getVisibility()==View.VISIBLE) exportWindow.hideWindow(); else exportWindow.showWindow();}
                 else if(item.equals("Exit")){new AlertDialog.Builder(this).setTitle("Exit").setMessage("Keluar?").setPositiveButton("Ya",(d,w)->finish()).setNegativeButton("Tidak",null).show();}
                 else toast("File: "+item); break;
             case "Edit":
@@ -325,6 +391,263 @@ public class MainActivity extends AppCompatActivity {
                 if(item.equals("Canvas Size")){if(canvasSizeWindow.getVisibility()==View.VISIBLE)canvasSizeWindow.hideWindow();else{canvasSizeWindow.setCurrentPreset(canvasView.getCurrentPreset());canvasSizeWindow.showWindow();}}
                 else toast("Settings: "+item); break;
         }
+    }
+
+    private void launchImportPicker() {
+        if (importLauncher == null) {
+            toast("Picker import belum siap");
+            return;
+        }
+        importLauncher.launch(new String[]{"image/*", "video/*", "application/zip"});
+    }
+
+    private void launchExport(ExportWindow.ExportTarget target, ExportWindow.VideoCodec codec) {
+        pendingExportTarget = target;
+        pendingVideoCodec = codec == ExportWindow.VideoCodec.H265 ? ExportEngine.VideoCodec.H265 : ExportEngine.VideoCodec.H264;
+        if (exportLauncher == null) {
+            toast("Picker export belum siap");
+            return;
+        }
+
+        String suggestedName;
+        switch (target) {
+            case PNG_SINGLE:
+                suggestedName = "frame.png";
+                break;
+            case PNG_ZIP:
+                suggestedName = "frames.zip";
+                break;
+            case VIDEO_MP4:
+                suggestedName = "export.mp4";
+                break;
+            case VIDEO_MKV:
+                suggestedName = "export.mkv";
+                break;
+            default:
+                suggestedName = "export.bin";
+                break;
+        }
+        exportLauncher.launch(suggestedName);
+    }
+
+    private void startExport(Uri uri) {
+        if (exportEngine == null) {
+            exportEngine = new ExportEngine(this);
+        }
+        if (pendingExportTarget == null) {
+            toast("Target ekspor belum dipilih");
+            return;
+        }
+
+        showProgressWindow("Exporting", "Preparing export...");
+        new Thread(() -> {
+            try {
+                String container = pendingExportTarget == ExportWindow.ExportTarget.VIDEO_MKV ? "mkv" : "mp4";
+                if (pendingExportTarget == ExportWindow.ExportTarget.PNG_SINGLE) {
+                    exportEngine.exportCurrentFrame(project, uri, (status, current, total) -> runOnUiThread(() -> updateProgressWindow(status, current, total)));
+                } else if (pendingExportTarget == ExportWindow.ExportTarget.PNG_ZIP) {
+                    exportEngine.exportSequenceZip(project, uri, (status, current, total) -> runOnUiThread(() -> updateProgressWindow(status, current, total)));
+                } else {
+                    exportEngine.exportVideo(project, uri, container, pendingVideoCodec, (status, current, total) -> runOnUiThread(() -> updateProgressWindow(status, current, total)));
+                }
+                runOnUiThread(() -> {
+                    toast("Export berhasil");
+                    hideProgressWindow();
+                });
+            } catch (Exception e) {
+                runOnUiThread(() -> {
+                    toast("Gagal export: " + e.getMessage());
+                    hideProgressWindow();
+                });
+            }
+        }).start();
+    }
+
+    private void handleImportedUri(Uri uri) {
+        try {
+            String mime = getContentResolver().getType(uri);
+            String lower = uri.toString().toLowerCase();
+
+            if (isZip(mime, lower)) {
+                ArrayList<Bitmap> frames = loadZipFrames(uri);
+                runOnUiThread(() -> {
+                    applyImportedFrames(frames, "zip");
+                    hideProgressWindow();
+                });
+                return;
+            }
+
+            if (isVideo(mime, lower)) {
+                ArrayList<Bitmap> frames = loadVideoFrames(uri);
+                runOnUiThread(() -> {
+                    applyImportedFrames(frames, "video");
+                    hideProgressWindow();
+                });
+                return;
+            }
+
+            if (isImage(mime, lower)) {
+                Bitmap bitmap = loadBitmap(uri);
+                runOnUiThread(() -> {
+                    applyImportedFrames(bitmap == null ? new ArrayList<>() : new ArrayList<>(List.of(bitmap)), "gambar");
+                    hideProgressWindow();
+                });
+                return;
+            }
+
+            runOnUiThread(() -> {
+                toast("Format file tidak didukung");
+                hideProgressWindow();
+            });
+        } catch (Exception e) {
+            runOnUiThread(() -> {
+                toast("Gagal import: " + e.getMessage());
+                hideProgressWindow();
+            });
+        }
+    }
+
+    private void showProgressWindow(String title, String status) {
+        if (progressWindow == null) return;
+        progressWindow.setTitleText(title);
+        progressWindow.setStatusText(status);
+        progressWindow.setProgress(0f);
+        progressWindow.showWindow();
+    }
+
+    private void updateProgressWindow(String status, int current, int total) {
+        if (progressWindow == null) return;
+        progressWindow.setStatusText(status);
+        if (total <= 0) {
+            progressWindow.setProgress(0.5f);
+        } else {
+            progressWindow.setProgress(Math.min(1f, current / (float) total));
+        }
+    }
+
+    private void hideProgressWindow() {
+        if (progressWindow != null) progressWindow.hideWindow();
+    }
+
+    private boolean isZip(String mime, String lower) {
+        return (mime != null && mime.equals("application/zip")) || lower.endsWith(".zip");
+    }
+
+    private boolean isVideo(String mime, String lower) {
+        if (mime != null && mime.startsWith("video/")) return true;
+        return lower.endsWith(".mp4") || lower.endsWith(".mov") || lower.endsWith(".mkv") || lower.endsWith(".webm");
+    }
+
+    private boolean isImage(String mime, String lower) {
+        if (mime != null && mime.startsWith("image/")) return true;
+        return lower.endsWith(".png") || lower.endsWith(".jpg") || lower.endsWith(".jpeg") || lower.endsWith(".webp");
+    }
+
+    private Bitmap loadBitmap(Uri uri) throws IOException {
+        try (InputStream is = getContentResolver().openInputStream(uri)) {
+            if (is == null) return null;
+            return BitmapFactory.decodeStream(is);
+        }
+    }
+
+    private ArrayList<Bitmap> loadZipFrames(Uri uri) throws IOException {
+        ArrayList<NamedBitmap> candidates = new ArrayList<>();
+        updateProgressWindow("Scanning zip...", 0, 0);
+        try (InputStream raw = getContentResolver().openInputStream(uri);
+             ZipInputStream zis = raw == null ? null : new ZipInputStream(raw)) {
+            if (zis == null) throw new IOException("Tidak bisa membuka zip");
+            ZipEntry entry;
+            while ((entry = zis.getNextEntry()) != null) {
+                if (entry.isDirectory()) continue;
+                String name = entry.getName().toLowerCase();
+                if (!isImage(null, name)) continue;
+                Bitmap bitmap = BitmapFactory.decodeStream(zis);
+                if (bitmap != null) {
+                    candidates.add(new NamedBitmap(entry.getName(), bitmap));
+                    runOnUiThread(() -> updateProgressWindow("Decoding zip", candidates.size(), Math.max(1, candidates.size())));
+                }
+            }
+        }
+
+        if (candidates.isEmpty()) throw new IOException("Zip tidak mengandung gambar valid");
+        Collections.sort(candidates, (a, b) -> a.name.compareToIgnoreCase(b.name));
+
+        ArrayList<Bitmap> frames = new ArrayList<>();
+        for (NamedBitmap candidate : candidates) frames.add(candidate.bitmap);
+        return frames;
+    }
+
+    private ArrayList<Bitmap> loadVideoFrames(Uri uri) throws IOException {
+        MediaMetadataRetriever retriever = new MediaMetadataRetriever();
+        try {
+            retriever.setDataSource(this, uri);
+            String durationRaw = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION);
+            long durationMs = durationRaw == null ? 0 : Long.parseLong(durationRaw);
+            if (durationMs <= 0) durationMs = 1000L;
+
+            int fps = Math.max(1, project.getFps());
+            long stepMs = Math.max(1, Math.round(1000f / fps));
+            int totalFrames = Math.max(1, (int) Math.ceil(durationMs / (float) stepMs));
+
+            ArrayList<Bitmap> frames = new ArrayList<>();
+            for (int i = 0; i < totalFrames; i++) {
+                long timeUs = Math.min(durationMs * 1000L, i * stepMs * 1000L);
+                Bitmap bitmap = retriever.getFrameAtTime(timeUs, MediaMetadataRetriever.OPTION_CLOSEST_SYNC);
+                if (bitmap != null) frames.add(bitmap);
+                final int current = i + 1;
+                final int total = totalFrames;
+                runOnUiThread(() -> updateProgressWindow("Extracting video", current, total));
+            }
+
+            if (frames.isEmpty()) throw new IOException("Tidak ada frame video yang bisa diekstrak");
+            return frames;
+        } finally {
+            retriever.release();
+        }
+    }
+
+    private void applyImportedFrames(ArrayList<Bitmap> frames, String label) {
+        if (frames == null || frames.isEmpty()) {
+            toast("Tidak ada frame yang berhasil diimport");
+            return;
+        }
+
+        AnimationProject.Layer layer = project.getCurrentLayer();
+        if (layer == null) {
+            toast("Layer aktif tidak tersedia");
+            return;
+        }
+
+        for (Bitmap bitmap : frames) {
+            AnimationProject.Frame frame = new AnimationProject.Frame(project.getDocW(), project.getDocH());
+            copyBitmapToFrame(bitmap, frame.bitmap);
+            frame.isEmpty = false;
+            layer.frames.add(frame);
+            if (bitmap != null && !bitmap.isRecycled()) bitmap.recycle();
+        }
+
+        project.recalcFrameCountPublic();
+        project.setCurrentFrame(layer.getFrameCount() - 1);
+        syncEngineToFrame();
+        canvasView.invalidate();
+        timelineView.invalidate();
+        toast("Import " + label + " berhasil: " + frames.size() + " frame");
+    }
+
+    private void copyBitmapToFrame(Bitmap source, Bitmap target) {
+        if (source == null || target == null) return;
+        Canvas canvas = new Canvas(target);
+        canvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR);
+
+        if (source.isRecycled()) return;
+
+        float scale = Math.min(target.getWidth() / (float) source.getWidth(), target.getHeight() / (float) source.getHeight());
+        float offsetX = (target.getWidth() - source.getWidth() * scale) / 2f;
+        float offsetY = (target.getHeight() - source.getHeight() * scale) / 2f;
+        Matrix matrix = new Matrix();
+        matrix.postScale(scale, scale);
+        matrix.postTranslate(offsetX, offsetY);
+        canvas.drawBitmap(source, matrix, null);
     }
 
     private void hideSystemUI(){
@@ -350,6 +673,8 @@ public class MainActivity extends AppCompatActivity {
         if(dropdown.getVisibility()==View.VISIBLE){dropdown.hide();menuBar.closeMenu();return;}
         if(canvasSizeWindow.getVisibility()==View.VISIBLE){canvasSizeWindow.hideWindow();return;}
         if(onionSkinWindow.getVisibility()==View.VISIBLE){onionSkinWindow.hideWindow();return;}
+        if(exportWindow!=null&&exportWindow.getVisibility()==View.VISIBLE){exportWindow.hideWindow();return;}
+        if(progressWindow!=null&&progressWindow.getVisibility()==View.VISIBLE){progressWindow.hideWindow();return;}
         if(timelineVisible){toggleTimeline();return;}
         super.onBackPressed();
     }
