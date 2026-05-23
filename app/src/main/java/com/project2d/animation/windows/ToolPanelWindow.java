@@ -18,7 +18,6 @@ public class ToolPanelWindow extends View {
 
     public interface OnToolChanged {
         void onToolSelected(DrawingEngine.Tool tool);
-        void onUndoClicked();
         void onClearClicked();
     }
 
@@ -46,9 +45,9 @@ public class ToolPanelWindow extends View {
 
     // Tool buttons
     private static final String[] TOOL_LABELS  = {"Brush","Eraser","Fill"};
-    private static final String[] ACTION_LABELS = {"Undo","Clear"};
+    private static final String[] ACTION_LABELS = {"Clear"};
     private final RectF[] toolRects   = new RectF[3];
-    private final RectF[] actionRects = new RectF[2];
+    private final RectF[] actionRects = new RectF[1];
 
     private boolean closeHov=false;
     private int hoveredTool=-1, hoveredAction=-1;
@@ -64,7 +63,7 @@ public class ToolPanelWindow extends View {
         density=getResources().getDisplayMetrics().density;
         winW=110*density;
         for(int i=0;i<3;i++) toolRects[i]=new RectF();
-        for(int i=0;i<2;i++) actionRects[i]=new RectF();
+        for(int i=0;i<1;i++) actionRects[i]=new RectF();
 
         pBg.setColor(ImGuiTheme.COLOR_FLOAT_WIN_BG);          pBg.setStyle(Paint.Style.FILL);
         pTitle.setColor(ImGuiTheme.COLOR_FLOAT_WIN_TITLE);     pTitle.setStyle(Paint.Style.FILL);
@@ -172,8 +171,7 @@ public class ToolPanelWindow extends View {
                     int ht=hitTool(tx,ty);
                     if(ht>=0){selectedTool=DrawingEngine.Tool.values()[ht];if(listener!=null)listener.onToolSelected(selectedTool);}
                     int ha=hitAction(tx,ty);
-                    if(ha==0&&listener!=null) listener.onUndoClicked();
-                    if(ha==1&&listener!=null) listener.onClearClicked();
+                    if(ha==0&&listener!=null) listener.onClearClicked();
                 }
                 closeHov=false;hoveredTool=-1;hoveredAction=-1;invalidate();return true;
             case MotionEvent.ACTION_CANCEL:

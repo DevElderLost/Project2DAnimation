@@ -148,7 +148,6 @@ public class MainActivity extends AppCompatActivity {
         toolPanelWindow.setPosition(8*density,menuBarH+toolbarH+8*density);
         toolPanelWindow.setOnToolChanged(new ToolPanelWindow.OnToolChanged(){
             @Override public void onToolSelected(DrawingEngine.Tool t){drawingEngine.setTool(t);toolPanelWindow.setSelectedTool(t);}
-            @Override public void onUndoClicked(){if(drawingEngine.canUndo()){drawingEngine.undo();canvasView.invalidate();}}
             @Override public void onClearClicked(){
                 new AlertDialog.Builder(MainActivity.this).setTitle("Clear").setMessage("Hapus gambar frame ini?")
                     .setPositiveButton("Ya",(d,w)->{drawingEngine.clearCanvas();canvasView.invalidate();}).setNegativeButton("Tidak",null).show();
@@ -282,7 +281,7 @@ public class MainActivity extends AppCompatActivity {
     private void setupToolbar(){
         toolbar.setOnToolbarAction(new ToolbarView.OnToolbarAction(){
             @Override public void onUndo(){if(drawingEngine.canUndo()){drawingEngine.undo();canvasView.invalidate();}}
-            @Override public void onRedo(){toast("Redo belum tersedia");}
+            @Override public void onRedo(){if(drawingEngine.canRedo()){drawingEngine.redo();canvasView.invalidate();}}
             @Override public void onToggleTools(){int v=toolPanelWindow.getVisibility()==View.VISIBLE?View.GONE:View.VISIBLE;toolPanelWindow.setVisibility(v);toolbar.setToolsActive(v==View.VISIBLE);}
             @Override public void onToggleBrush(){int v=brushColorWindow.getVisibility()==View.VISIBLE?View.GONE:View.VISIBLE;brushColorWindow.setVisibility(v);toolbar.setBrushActive(v==View.VISIBLE);}
             @Override public void onToggleTimeline(){toggleTimeline();}
@@ -386,6 +385,7 @@ public class MainActivity extends AppCompatActivity {
                 else toast("File: "+item); break;
             case "Edit":
                 if(item.equals("Undo")){if(drawingEngine.canUndo()){drawingEngine.undo();canvasView.invalidate();}}
+                else if(item.equals("Redo")){if(drawingEngine.canRedo()){drawingEngine.redo();canvasView.invalidate();}}
                 else toast("Edit: "+item); break;
             case "Settings":
                 if(item.equals("Canvas Size")){if(canvasSizeWindow.getVisibility()==View.VISIBLE)canvasSizeWindow.hideWindow();else{canvasSizeWindow.setCurrentPreset(canvasView.getCurrentPreset());canvasSizeWindow.showWindow();}}

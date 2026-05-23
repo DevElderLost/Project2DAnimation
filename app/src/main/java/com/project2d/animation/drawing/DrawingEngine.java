@@ -8,6 +8,8 @@ import android.graphics.Path;
 import android.graphics.PorterDuff;
 import android.graphics.PorterDuffXfermode;
 
+import java.util.ArrayList;
+
 /**
  * DrawingEngine dengan cancelStroke() untuk membatalkan stroke
  * tanpa menyimpan ke bitmap — digunakan saat jari kedua turun.
@@ -35,8 +37,8 @@ public class DrawingEngine {
     private boolean pathStarted=false;
 
     private static final int MAX_UNDO = 20;
-    private final Bitmap[] undoStack  = new Bitmap[MAX_UNDO];
-    private int undoTop=0,undoCount=0;
+    private final ArrayList<Bitmap> undoStack = new ArrayList<>();
+    private final ArrayList<Bitmap> redoStack = new ArrayList<>();
 
     public DrawingEngine(){ setupPaints(); }
 
@@ -61,7 +63,7 @@ public class DrawingEngine {
         if(drawBitmap!=null&&!drawBitmap.isRecycled())
             new Canvas(nb).drawBitmap(drawBitmap,0,0,null);
         drawBitmap=nb; drawCanvas=new Canvas(drawBitmap);
-        undoTop=0; undoCount=0;
+        clearHistory();
     }
 
     /**
@@ -71,7 +73,7 @@ public class DrawingEngine {
     public void setBitmapRef(Bitmap bm,boolean isEmpty){
         if(bm==null) return;
         drawBitmap=bm; drawCanvas=new Canvas(drawBitmap);
-        undoTop=0; undoCount=0;
+        clearHistory();
         strokeSnapshot=null; pathStarted=false;
     }
 
@@ -79,10 +81,8 @@ public class DrawingEngine {
 
     public void startStroke(float x,float y){
         if(drawCanvas==null) return;
-        // Simpan snapshot untuk undo DAN untuk cancel
+        clearRedo();
         strokeSnapshot=drawBitmap.copy(Bitmap.Config.ARGB_8888,false);
-        // Juga simpan ke undo stack
-        saveUndoFromSnapshot(strokeSnapshot);
         currentPath.reset();
         currentPath.moveTo(x,y);
         lastX=x; lastY=y; pathStarted=true;
@@ -102,6 +102,8 @@ public class DrawingEngine {
         drawStroke();
         currentPath.reset();
         pathStarted=false;
+        saveUndo(strokeSnapshot);
+        pushRedo(snapshotCurrent());
         strokeSnapshot=null; // commit berhasil, buang snapshot cancel
         markModified();
     }
@@ -114,12 +116,9 @@ public class DrawingEngine {
         if(!pathStarted) return;
         currentPath.reset();
         pathStarted=false;
-        // Restore bitmap ke kondisi sebelum stroke dimulai
         if(strokeSnapshot!=null&&drawCanvas!=null&&!strokeSnapshot.isRecycled()){
             drawCanvas.drawColor(Color.TRANSPARENT,PorterDuff.Mode.CLEAR);
             drawCanvas.drawBitmap(strokeSnapshot,0,0,null);
-            // Rollback undo yang tadi disimpan saat startStroke
-            if(undoCount>0){ undoCount--; undoTop--; }
         }
         strokeSnapshot=null;
     }
@@ -147,7 +146,8 @@ public class DrawingEngine {
 
     public void fill(float x,float y){
         if(drawBitmap==null) return;
-        saveUndo();
+        saveUndo(snapshotCurrent());
+        clearRedo();
         int px=(int)x,py=(int)y;
         if(px<0||py<0||px>=drawBitmap.getWidth()||py>=drawBitmap.getHeight()) return;
         int from=drawBitmap.getPixel(px,py);
@@ -176,33 +176,74 @@ public class DrawingEngine {
 
     // ── Undo ──────────────────────────────────────────────────────────────────
 
-    private void saveUndo(){
-        if(drawBitmap==null) return;
-        saveUndoFromSnapshot(drawBitmap.copy(Bitmap.Config.ARGB_8888,false));
+    private Bitmap snapshotCurrent(){
+        if(drawBitmap==null) return null;
+        return drawBitmap.copy(Bitmap.Config.ARGB_8888,false);
     }
 
-    private void saveUndoFromSnapshot(Bitmap snap){
+    private void clearHistory(){
+        for(Bitmap bitmap:undoStack){ if(bitmap!=null&&!bitmap.isRecycled()) bitmap.recycle(); }
+        for(Bitmap bitmap:redoStack){ if(bitmap!=null&&!bitmap.isRecycled()) bitmap.recycle(); }
+        undoStack.clear();
+        redoStack.clear();
+    }
+
+    private void clearRedo(){
+        for(Bitmap bitmap:redoStack){ if(bitmap!=null&&!bitmap.isRecycled()) bitmap.recycle(); }
+        redoStack.clear();
+    }
+
+    private void saveUndo(Bitmap snap){
         if(snap==null) return;
-        undoStack[undoTop%MAX_UNDO]=snap;
-        undoTop++; if(undoCount<MAX_UNDO) undoCount++;
+        if(undoStack.size()==MAX_UNDO){
+            Bitmap oldest=undoStack.remove(0);
+            if(oldest!=null&&!oldest.isRecycled()) oldest.recycle();
+        }
+        undoStack.add(snap);
     }
 
-    public boolean canUndo(){ return undoCount>0; }
+    private void pushRedo(Bitmap snap){
+        if(snap==null) return;
+        if(redoStack.size()==MAX_UNDO){
+            Bitmap oldest=redoStack.remove(0);
+            if(oldest!=null&&!oldest.isRecycled()) oldest.recycle();
+        }
+        redoStack.add(snap);
+    }
+
+    public boolean canUndo(){ return !undoStack.isEmpty(); }
+    public boolean canRedo(){ return !redoStack.isEmpty(); }
 
     public void undo(){
         if(!canUndo()||drawBitmap==null) return;
-        undoTop--; undoCount--;
-        Bitmap snap=undoStack[undoTop%MAX_UNDO];
-        if(snap!=null&&!snap.isRecycled()){
+        Bitmap current=snapshotCurrent();
+        Bitmap prev=undoStack.remove(undoStack.size()-1);
+        pushRedo(current);
+        if(prev!=null&&!prev.isRecycled()){
             drawCanvas.drawColor(Color.TRANSPARENT,PorterDuff.Mode.CLEAR);
-            drawCanvas.drawBitmap(snap,0,0,null);
+            drawCanvas.drawBitmap(prev,0,0,null);
         }
+        markModified();
+    }
+
+    public void redo(){
+        if(!canRedo()||drawBitmap==null) return;
+        Bitmap current=snapshotCurrent();
+        Bitmap next=redoStack.remove(redoStack.size()-1);
+        saveUndo(current);
+        if(next!=null&&!next.isRecycled()){
+            drawCanvas.drawColor(Color.TRANSPARENT,PorterDuff.Mode.CLEAR);
+            drawCanvas.drawBitmap(next,0,0,null);
+        }
+        markModified();
     }
 
     public void clearCanvas(){
         if(drawCanvas==null) return;
-        saveUndo();
+        saveUndo(snapshotCurrent());
+        clearRedo();
         drawCanvas.drawColor(Color.TRANSPARENT,PorterDuff.Mode.CLEAR);
+        markModified();
     }
 
     // ── Getters / Setters ─────────────────────────────────────────────────────

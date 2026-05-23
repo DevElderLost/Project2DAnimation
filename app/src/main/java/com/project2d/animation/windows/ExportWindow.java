@@ -22,6 +22,7 @@ public class ExportWindow extends View {
     private final Paint shadowPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint borderPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint titlePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint titleBgPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint textPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint buttonPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint buttonHoverPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -78,6 +79,8 @@ public class ExportWindow extends View {
         titlePaint.setTextSize(13 * density);
         titlePaint.setTypeface(android.graphics.Typeface.MONOSPACE);
         titlePaint.setFakeBoldText(true);
+        titleBgPaint.setColor(ImGuiTheme.COLOR_FLOAT_WIN_TITLE);
+        titleBgPaint.setStyle(Paint.Style.FILL);
         textPaint.setColor(ImGuiTheme.COLOR_TEXT);
         textPaint.setTextSize(11 * density);
         textPaint.setTypeface(android.graphics.Typeface.MONOSPACE);
@@ -153,7 +156,7 @@ public class ExportWindow extends View {
         canvas.drawRoundRect(windowRect, r, r, borderPaint);
 
         titleRect.set(winX, winY, winX + winW, winY + titleHeight);
-        canvas.drawRoundRect(new RectF(winX, winY, winX + winW, winY + titleHeight + r), r, r, ImGuiTheme.COLOR_FLOAT_WIN_TITLE);
+        canvas.drawRoundRect(new RectF(winX, winY, winX + winW, winY + titleHeight + r), r, r, titleBgPaint);
 
         Paint.FontMetrics titleFm = titlePaint.getFontMetrics();
         canvas.drawText("Export", winX + pad, titleRect.centerY() - (titleFm.ascent + titleFm.descent) / 2f, titlePaint);

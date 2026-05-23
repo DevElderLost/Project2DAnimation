@@ -95,7 +95,6 @@ public class ExportEngine {
 
         if (codec == VideoCodec.H265) {
             format.setInteger(MediaFormat.KEY_PROFILE, MediaCodecInfo.CodecProfileLevel.HEVCProfileMain);
-            format.setInteger(MediaFormat.KEY_LEVEL, MediaCodecInfo.CodecProfileLevel.HEVCMainTierLevel4_1);
         }
 
         android.os.ParcelFileDescriptor pfd = null;
