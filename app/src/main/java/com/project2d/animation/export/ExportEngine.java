@@ -111,7 +111,7 @@ public class ExportEngine {
             muxer = new MediaMuxer(pfd.getFileDescriptor(), outputFormat);
 
             MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();
-            int trackIndex = -1;
+            int[] trackIndex = {-1};
             long presentationUs = 0;
             long frameDurationUs = 1_000_000L / fps;
             int total = frames.size();
@@ -121,7 +121,7 @@ public class ExportEngine {
                 byte[] yuv = bitmapToYuv(frame, colorFormat);
                 int inputIndex = encoder.dequeueInputBuffer(10000);
                 if (inputIndex < 0) {
-                    drainEncoder(encoder, muxer, info, () -> trackIndex, newTrack -> trackIndex = newTrack);
+                    drainEncoder(encoder, muxer, info, () -> trackIndex[0], newTrack -> trackIndex[0] = newTrack);
                     inputIndex = encoder.dequeueInputBuffer(10000);
                 }
                 ByteBuffer inputBuffer = encoder.getInputBuffer(inputIndex);
@@ -130,7 +130,7 @@ public class ExportEngine {
                 inputBuffer.put(yuv);
                 encoder.queueInputBuffer(inputIndex, 0, yuv.length, presentationUs, 0);
                 presentationUs += frameDurationUs;
-                drainEncoder(encoder, muxer, info, () -> trackIndex, newTrack -> trackIndex = newTrack);
+                drainEncoder(encoder, muxer, info, () -> trackIndex[0], newTrack -> trackIndex[0] = newTrack);
                 callback.onProgress("Mengekspor frame " + (i + 1), i + 1, total);
                 frame.recycle();
             }
@@ -139,7 +139,7 @@ public class ExportEngine {
             if (inputIndex >= 0) {
                 encoder.queueInputBuffer(inputIndex, 0, 0, presentationUs, MediaCodec.BUFFER_FLAG_END_OF_STREAM);
             }
-            drainEncoder(encoder, muxer, info, () -> trackIndex, newTrack -> trackIndex = newTrack);
+            drainEncoder(encoder, muxer, info, () -> trackIndex[0], newTrack -> trackIndex[0] = newTrack);
 
             if (muxer != null) {
                 muxer.stop();
